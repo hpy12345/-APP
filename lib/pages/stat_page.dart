@@ -60,12 +60,16 @@ class _StatPageState extends State<StatPage> {
       if (_grain == 'year') {
         final ny = _year + delta;
         if (ny < int.parse(rng.minMonth.substring(0, 4)) ||
-            ny > int.parse(rng.maxMonth.substring(0, 4))) return;
+            ny > int.parse(rng.maxMonth.substring(0, 4))) {
+          return;
+        }
         _year = ny;
       } else {
         final next = monthKeyShift(_curKey, delta);
         if (next.compareTo(rng.minMonth) < 0 ||
-            next.compareTo(rng.maxMonth) > 0) return;
+            next.compareTo(rng.maxMonth) > 0) {
+          return;
+        }
         _year = int.parse(next.substring(0, 4));
         _month = int.parse(next.substring(5, 7));
       }
@@ -88,7 +92,7 @@ class _StatPageState extends State<StatPage> {
         ? vm.monthlySumsOfYear(_year)
             .fold<int>(0, (s, m) => s + m.income)
         : vm.monthSum(_curKey).income;
-    final colors = Palette.chartColors;
+    const colors = Palette.chartColors;
 
     // 步进边界
     final canPrev = isYear

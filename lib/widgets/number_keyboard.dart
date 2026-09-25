@@ -224,7 +224,7 @@ class _SaveKey extends StatelessWidget {
               style: serifStyle.copyWith(
                   fontSize: 17,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFFFDF6EC),
+                  color: const Color(0xFFFDF6EC),
                   letterSpacing: 2)),
         ),
       ),

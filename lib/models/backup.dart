@@ -101,7 +101,7 @@ BackupDto _parseRaw(String raw) {
     // type / amount / categoryId / date 已由 isValidBillJson 保证类型，
     // 其余字段走宽容转换 —— 备份是用户可手改的文件，类型不符不该崩。
     final uuid =
-        map['uuid']?.toString() ?? 'imported-${i}-${map['date']}';
+        map['uuid']?.toString() ?? 'imported-$i-${map['date']}';
     bills.add(Bill(
       uuid: uuid,
       type: map['type'] as String,

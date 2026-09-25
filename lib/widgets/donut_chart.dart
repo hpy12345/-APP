@@ -84,7 +84,7 @@ class _DonutPainter extends CustomPainter {
       return;
     }
 
-    final gap = 0.028; // 扇形之间的缝隙（弧度）
+    const gap = 0.028; // 扇形之间的缝隙（弧度）
     var start = -math.pi / 2; // 12 点方向起始
 
     for (var i = 0; i < rows.length; i++) {

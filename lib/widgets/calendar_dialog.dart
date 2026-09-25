@@ -149,7 +149,7 @@ class _CalendarDialogState extends State<_CalendarDialog> {
                 end: Alignment.bottomCenter,
                 colors: [Palette.paper, Palette.card]),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Color(0x47B08D4F)), // 描金内框
+            border: Border.all(color: const Color(0x47B08D4F)), // 描金内框
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -458,16 +458,16 @@ class _CalendarDialogState extends State<_CalendarDialog> {
           children: [
             _legendDot(const LinearGradient(colors: [Palette.expense, Palette.expense])),
             const SizedBox(width: 3),
-            Text('支出', style: _legendStyle),
+            const Text('支出', style: _legendStyle),
             const SizedBox(width: 10),
             _legendDot(const LinearGradient(colors: [Palette.income, Palette.income])),
             const SizedBox(width: 3),
-            Text('收入', style: _legendStyle),
+            const Text('收入', style: _legendStyle),
             const SizedBox(width: 10),
             _legendDot(const LinearGradient(
                 colors: [Palette.expense, Palette.income], stops: [0.5, 0.5])),
             const SizedBox(width: 3),
-            Text('都有', style: _legendStyle),
+            const Text('都有', style: _legendStyle),
             const Spacer(),
             _footBtn('本月', Colors.transparent, () {
               final now = DateTime.now();
