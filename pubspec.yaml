@@ -1,0 +1,62 @@
+name: ledger
+description: "国风记账本 · Android 版（原型：手机记账APP/index.html，方案：优化与Android落地方案.md）"
+publish_to: "none"
+
+# ── 版本号管理（升级只改这里）──────────────────────────────
+# 语义：major.minor.patch+build
+#   - patch  ：缺陷修复 / 细节优化      → build +1
+#   - minor  ：新功能（数据结构不变）    → build +1
+#   - major  ：重大改版 / 破坏性变更    → build +1
+# 注意：build(versionCode) 必须单调递增，否则商店/安装器拒绝覆盖升级。
+# Android 端 app/build.gradle.kts 会自动读取此处的 version，无需改两处。
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # 状态管理：轻量 Provider（单 ViewModel）。
+  # 后续若按落地方案升级为 Riverpod（每页一个 Notifier），仅影响 viewmodel/ 目录，UI 层不变。
+  provider: ^6.1.2
+
+  # 本地持久化：SQLite（账单 / 预算 / 分类 / 账户）
+  sqflite: ^2.3.3
+  path: ^1.9.0
+
+  # 应用内外文件路径（自动备份目录）
+  path_provider: ^2.1.4
+
+  # 系统文件选择器（SAF）：备份导出 / 导入，零存储权限
+  file_picker: ^8.1.2
+
+  # 轻量偏好（首启引导标记等）
+  shared_preferences: ^2.3.2
+
+  # 读取自身版本号（「关于」页展示）
+  package_info_plus: ^8.0.2
+
+  # 日期 / 数字格式化（千分位、本地化）。
+  # 版本由 flutter_localizations 钉住（不同 Flutter SDK 钉不同 intl 大版本），
+  # 写 any 让 SDK 决定，避免升级 Flutter 后版本冲突。
+  intl: any
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+
+  # ── 扩展点：内嵌思源宋体子集 ──────────────────────────────
+  # 落地方案建议内嵌字体防止厂商 ROM 缺字。将 OFL 协议的子集字体放入
+  # assets/fonts/ 后取消注释（SIL OFL 可商用）：
+  # fonts:
+  #   - family: Songti
+  #     fonts:
+  #       - asset: assets/fonts/SourceHanSerifSC-Regular.otf
