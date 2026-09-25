@@ -43,7 +43,7 @@ class _StatPageState extends State<StatPage> {
   String get _curKey => '$_year-${_month.toString().padLeft(2, '0')}';
 
   /// 数据范围收窄后（例如把最早那批账单删掉）把游标夹回区间内，
-  /// 否则步进按钮会「点了没反应」，用户卡在已无数据的空档月份。
+  /// 否则用户会卡在已无数据的空档月份（日历里翻不到、页面又是空的）。
   /// 注意：这里直接改字段而不 setState —— 本方法在 build 期间调用，
   /// 赋值只影响同一次 build 的后续计算，属于幂等的自我修正。
   void _clampToRange(DataRange rng) {
@@ -54,28 +54,6 @@ class _StatPageState extends State<StatPage> {
       _year = int.parse(rng.maxMonth.substring(0, 4));
       _month = int.parse(rng.maxMonth.substring(5, 7));
     }
-  }
-
-  void _shift(int delta) {
-    final rng = context.read<LedgerViewModel>().dataRange;
-    setState(() {
-      if (_grain == 'year') {
-        final ny = _year + delta;
-        if (ny < int.parse(rng.minMonth.substring(0, 4)) ||
-            ny > int.parse(rng.maxMonth.substring(0, 4))) {
-          return;
-        }
-        _year = ny;
-      } else {
-        final next = monthKeyShift(_curKey, delta);
-        if (next.compareTo(rng.minMonth) < 0 ||
-            next.compareTo(rng.maxMonth) > 0) {
-          return;
-        }
-        _year = int.parse(next.substring(0, 4));
-        _month = int.parse(next.substring(5, 7));
-      }
-    });
   }
 
   @override
@@ -98,14 +76,6 @@ class _StatPageState extends State<StatPage> {
         : vm.monthSum(_curKey).income;
     const colors = Palette.chartColors;
 
-    // 步进边界
-    final canPrev = isYear
-        ? _year > int.parse(rng.minMonth.substring(0, 4))
-        : _curKey.compareTo(rng.minMonth) > 0;
-    final canNext = isYear
-        ? _year < int.parse(rng.maxMonth.substring(0, 4))
-        : _curKey.compareTo(rng.maxMonth) < 0;
-
     return Scaffold(
       backgroundColor: Colors.transparent,
       // 与首页同理：开着会让 body 按 viewInsets 收窄，底部露出黑缝
@@ -118,32 +88,18 @@ class _StatPageState extends State<StatPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // ── 头部 ──
+                // 副标题（「2026 年 9 月 · 支出构成」）已删：下面的步进器本身就写着
+                // 年月，同一句话出现两遍；删掉也让粒度段控有位置挪到右端。
                 Padding(
                   padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
                   child: Row(
                     children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('统计',
-                                style: serifStyle.copyWith(
-                                    fontSize: 23,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 3)),
-                            const SizedBox(height: 4),
-                            Text(
-                              isYear
-                                  ? '$_year 年 · 全年收支概览'
-                                  : '$_year 年 $_month 月 · 支出构成',
-                              style: const TextStyle(
-                                  fontSize: 12,
-                                  color: Palette.textSub,
-                                  letterSpacing: 0.5),
-                            ),
-                          ],
-                        ),
-                      ),
+                      Text('统计',
+                          style: serifStyle.copyWith(
+                              fontSize: 23,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 3)),
+                      const Spacer(),
                       // 数据管理入口（备份 / 恢复 / 关于）
                       IconButton(
                         tooltip: '数据管理',
@@ -158,71 +114,63 @@ class _StatPageState extends State<StatPage> {
                   ),
                 ),
 
-                // ── 粒度切换 + 时间步进 ──
+                // ── 时间步进 + 粒度切换 ──
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Row(
                     children: [
-                      // 月 / 年 段控 —— 与账单页共用 GrainSwitch，样式统一
-                      GrainSwitch(
-                        labels: const ['月', '年'],
-                        selected: isYear ? 1 : 0,
-                        onChanged: (i) => setState(
-                            () => _grain = i == 1 ? 'year' : 'month'),
-                      ),
-                      const SizedBox(width: 10),
-                      // 步进器（中间可点，打开日历直接跳到某月/某年）
+                      // 步进器：中间可点，打开日历直接跳到某月 / 某年。
+                      // 两侧的 ‹ › 已去掉 —— 换期全靠这个日历入口，留着箭头只是重复。
                       Expanded(
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 4, vertical: 3),
+                              horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
                             color: Palette.card,
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(color: Palette.line),
                           ),
-                          child: Row(
-                            children: [
-                              _stepBtn('‹', canPrev, () => _shift(-1)),
-                              Expanded(
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(5),
-                                  onTap: () => _pickPeriod(vm, isYear),
-                                  child: Padding(
-                                    padding:
-                                        const EdgeInsets.symmetric(vertical: 4),
-                                    child: Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        Flexible(
-                                          child: Text(
-                                            isYear
-                                                ? '$_year 年'
-                                                : '$_year 年 $_month 月',
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: serifStyle.copyWith(
-                                                fontSize: 14.5,
-                                                fontWeight: FontWeight.w700,
-                                                letterSpacing: 1.4,
-                                                color: Palette.brand),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 5),
-                                        const Icon(
-                                            Icons.calendar_month_outlined,
-                                            size: 15,
-                                            color: Palette.textSub),
-                                      ],
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(5),
+                            onTap: () => _pickPeriod(vm, isYear),
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 6),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      isYear
+                                          ? '$_year 年'
+                                          : '$_year 年 $_month 月',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: serifStyle.copyWith(
+                                          fontSize: 14.5,
+                                          fontWeight: FontWeight.w700,
+                                          letterSpacing: 1.4,
+                                          color: Palette.brand),
                                     ),
                                   ),
-                                ),
+                                  const SizedBox(width: 6),
+                                  const Icon(
+                                      Icons.calendar_month_outlined,
+                                      size: 15,
+                                      color: Palette.textSub),
+                                ],
                               ),
-                              _stepBtn('›', canNext, () => _shift(1)),
-                            ],
+                            ),
                           ),
                         ),
+                      ),
+                      const SizedBox(width: 10),
+                      // 月 / 年 段控 —— 与账单页共用 GrainSwitch，样式统一
+                      GrainSwitch(
+                        labels: const ['月', '年'],
+                        selected: isYear ? 1 : 0,
+                        onChanged: (i) =>
+                            setState(() => _grain = i == 1 ? 'year' : 'month'),
                       ),
                     ],
                   ),
@@ -274,7 +222,7 @@ class _StatPageState extends State<StatPage> {
                             rows: rows,
                             colors: colors,
                             totalCents: totalExpense),
-                        const SizedBox(width: 16),
+                        const SizedBox(width: 12),
                         Expanded(
                           child: DonutLegend(
                               rows: rows,
@@ -344,23 +292,6 @@ class _StatPageState extends State<StatPage> {
         });
       },
       onPickYear: (y) => setState(() => _year = y),
-    );
-  }
-
-  Widget _stepBtn(String arrow, bool enabled, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: enabled ? onTap : null,
-      child: Container(
-        width: 28,
-        height: 28,
-        alignment: Alignment.center,
-        child: Text(arrow,
-            style: serifStyle.copyWith(
-                fontSize: 15,
-                color: enabled
-                    ? Palette.textSub
-                    : Palette.textSub.withAlpha(77))),
-      ),
     );
   }
 }

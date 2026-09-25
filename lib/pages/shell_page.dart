@@ -106,8 +106,12 @@ class _ShellPageState extends State<ShellPage> {
           index: vm.currentTab,
           children: const [HomePage(), AddPage(), StatPage()],
         ),
-        floatingActionButton: _SealFab(onTap: () => vm.switchTab(1)),
-        floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+        // 不再用 floatingActionButton：「记一笔」入口改成标签栏中间的第 3 格
+        // （见 _TabBar 的 _AddSlot）。两条理由：
+        // ① 悬浮球是跨在「内容区 / 标签栏」交界上的，必然压住记账页底部
+        //    —— 换系统键盘前它正压在「0 / 今天」键上；
+        // ② 中间格完全落在标签栏内，点击热区不会被父级裁剪，也不用再靠
+        //    CircularNotchedRectangle 挖缺口。
         bottomNavigationBar: _TabBar(
           currentIndex: vm.currentTab,
           onTap: vm.switchTab,
@@ -164,39 +168,65 @@ class _ShellPageState extends State<ShellPage> {
   }
 }
 
-/// 印章式「记一笔」FAB：朱砂径向渐变 + 金边
-class _SealFab extends StatelessWidget {
+/// 标签栏里的「记一笔」格：朱砂印章，居中于账单 / 统计之间。
+///
+/// 居中不是靠魔数，而是布局本身保证的：左右两个 Tab 都是 Expanded，
+/// 中间这一格是固定宽 —— 剩余空间被两侧等分，中间格必然落在屏幕水平中线上。
+class _AddSlot extends StatelessWidget {
+  final bool active;
   final VoidCallback onTap;
-  const _SealFab({required this.onTap});
+
+  /// 与两侧 Tab 的间距（也是印章的呼吸区）
+  static const double slotWidth = 76;
+
+  const _AddSlot({required this.active, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 50,
-        height: 50,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: const RadialGradient(
-            center: Alignment(-0.3, -0.5),
-            radius: 0.9,
-            colors: [Color(0xFFB8544A), Color(0xFF9E4034), Color(0xFF7F2F26)],
-            stops: [0.0, 0.58, 1.0],
+    return SizedBox(
+      width: slotWidth,
+      // 整格可点（热区比印章大一圈），空手点也不会落空
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Center(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: const RadialGradient(
+                center: Alignment(-0.3, -0.5),
+                radius: 0.9,
+                colors: [
+                  Color(0xFFB8544A),
+                  Color(0xFF9E4034),
+                  Color(0xFF7F2F26)
+                ],
+                stops: [0.0, 0.58, 1.0],
+              ),
+              border: Border.all(
+                  color: active
+                      ? const Color(0xE6B08D4F)
+                      : const Color(0x8CB08D4F),
+                  width: active ? 1.6 : 1),
+              boxShadow: const [
+                BoxShadow(
+                    color: Color(0x668D3227),
+                    offset: Offset(0, 4),
+                    blurRadius: 12),
+              ],
+            ),
+            child: const Icon(Icons.add, color: Color(0xFFEFE2C8), size: 24),
           ),
-          border: Border.all(color: const Color(0x8CB08D4F)),
-          boxShadow: const [
-            BoxShadow(
-                color: Color(0x668D3227), offset: Offset(0, 6), blurRadius: 16),
-          ],
         ),
-        child: const Icon(Icons.add, color: Color(0xFFEFE2C8), size: 26),
       ),
     );
   }
 }
 
-/// 国风底部标签栏：宣纸半透 + 两 Tab（账单 / 统计），中间留 FAB 缺口
+/// 国风底部标签栏：宣纸半透 + 账单 / 记一笔 / 统计 三格
 class _TabBar extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
@@ -211,12 +241,10 @@ class _TabBar extends StatelessWidget {
       elevation: 0,
       height: 62,
       padding: const EdgeInsets.symmetric(horizontal: 6),
-      shape: const CircularNotchedRectangle(),
-      notchMargin: 6,
       child: Row(
         children: [
           _tab(0, Icons.home_outlined, '账单'),
-          const Spacer(),
+          _AddSlot(active: currentIndex == 1, onTap: () => onTap(1)),
           _tab(2, Icons.pie_chart_outline, '统计'),
         ],
       ),

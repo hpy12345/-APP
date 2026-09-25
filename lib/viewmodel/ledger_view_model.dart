@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../data/app_db.dart';
 import '../data/backup_service.dart';
 import '../data/bill_repository.dart';
+import '../data/storage_stat.dart';
 import '../models/backup.dart';
 import '../models/bill.dart';
 import '../models/category.dart';
@@ -182,31 +183,13 @@ class LedgerViewModel extends ChangeNotifier {
     _bumpForm();
   }
 
-  void handleKey(String k) {
-    if (k == 'back') {
-      // 空缓冲直接返回：''.substring(0, -1) 会抛 RangeError 导致崩溃
-      if (form.buffer.isEmpty) return;
-      form.buffer = form.buffer.substring(0, form.buffer.length - 1);
-    } else if (k == '.') {
-      if (form.buffer.isEmpty) {
-        form.buffer = '0.';
-      } else if (!form.buffer.contains('.')) {
-        form.buffer += '.';
-      }
-    } else if (k == 'today') {
-      form.dateInt = todayInt();
-    } else if (RegExp(r'^[0-9]$').hasMatch(k)) {
-      if (form.buffer == '0') {
-        form.buffer = k; // 前导 0 替换
-      } else {
-        final dot = form.buffer.indexOf('.');
-        if (dot >= 0 && form.buffer.length - dot > 2) return; // 小数 ≤2 位
-        if (form.buffer.replaceAll('.', '').length >= 9) return; // 整数 ≤9 位
-        form.buffer += k;
-      }
-    } else {
-      return;
-    }
+  /// 金额缓冲写入（记账页的 TextField → 状态）。
+  ///
+  /// 位数约束（整数 ≤9 / 小数 ≤2 / 前导 0 替换）由输入框的
+  /// `TextInputFormatter` 在前端完成，这里只落状态 —— 两边都做校验就会出现
+  /// 「输入框显示 12.345 但状态里是 12.34」这类不一致。
+  void setFormBuffer(String buffer) {
+    form.buffer = buffer;
     _bumpForm();
   }
 
@@ -311,6 +294,21 @@ class LedgerViewModel extends ChangeNotifier {
 
   DataRange get dataRange => DataRange.of(bills);
 
+  /// 流水翻页可回看的最早日期。
+  ///
+  /// 旧实现直接把「最早账单日」当边界，而空账本时 `DataRange.of` 的 minDate
+  /// 就是今天 → 账单页两侧箭头永远处于禁用态，点了毫无反应
+  /// （用户反馈「账单页面日期两端的箭头无法使用」）。
+  /// 这里保证至少能回看 12 个月；有更早的账单时以账单为准。
+  int get browseMinDate {
+    final earliest = DataRange.of(bills).minDate;
+    final now = DateTime.now();
+    final floor = dateIntOf(DateTime(now.year - 1, now.month, 1));
+    return earliest < floor ? earliest : floor;
+  }
+
+  String get browseMinMonth => monthKeyOf(browseMinDate);
+
   List<Bill> billsOfView() {
     final v = billView;
     // bills 自身已由 repo 的 `ORDER BY date DESC, created_at DESC` 与
@@ -324,18 +322,17 @@ class LedgerViewModel extends ChangeNotifier {
   void shiftView(int delta) {
     final v = billView;
     final t = todayInt();
-    final rng = dataRange;
     if (v.mode == 'month') {
       final next = monthKeyShift(v.month, delta);
       if (next.compareTo(todayMonthKey()) > 0 ||
-          next.compareTo(rng.minMonth) < 0) {
+          next.compareTo(browseMinMonth) < 0) {
         return; // 越界
       }
       v.month = next;
     } else {
       final d = dtOf(v.date).add(Duration(days: delta));
       final next = dateIntOf(d);
-      if (next > t || next < rng.minDate) return;
+      if (next > t || next < browseMinDate) return;
       v.date = next;
     }
     _notifyData();
@@ -452,6 +449,9 @@ class LedgerViewModel extends ChangeNotifier {
       });
 
   Future<List<File>> listAutoBackups() => backup.listAutoBackups();
+
+  /// 本机存储体积（「数据与关于」页展示）
+  Future<StorageStat> storageStat() => backup.stat();
 
   Future<void> reload() async {
     bills = await repo.loadBills();

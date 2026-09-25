@@ -12,7 +12,13 @@ import '../utils/money.dart';
 /// - 扇区缝 0.028 rad，环宽 23 逻辑像素（= 模拟版 46@2x）
 /// - 单段 100% 不留缝
 /// - 空数据画浅色整环
+///
+/// 直径 168 → 150：右侧图例要放「分类名 + 占比 + 金额」三列，
+/// 而侧栏宽度 = 卡片宽 − 环形图 − 间距。168 时侧栏只剩 ~112，
+/// 系统字号 1.3 倍下三列塞不下，Flex 会把分类名压成 0 宽（表现为名字整列消失）。
 class DonutChart extends StatelessWidget {
+  static const double size = 150;
+
   final List<CategoryTotal> rows;
   final List<Color> colors;
   final int totalCents;
@@ -27,31 +33,38 @@ class DonutChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 168,
-      height: 168,
+      width: size,
+      height: size,
       child: Stack(
         alignment: Alignment.center,
         children: [
           CustomPaint(
-            size: const Size(168, 168),
+            size: const Size(size, size),
             painter: _DonutPainter(rows: rows, colors: colors, total: totalCents),
           ),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('总支出',
-                  style: serifStyle.copyWith(
-                      fontSize: 11,
-                      color: Palette.textSub,
-                      letterSpacing: 2)),
-              const SizedBox(height: 3),
-              Text('¥${fmtCentsShort(totalCents)}',
-                  style: serifStyle.copyWith(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      color: Palette.expense,
-                      letterSpacing: -0.3)),
-            ],
+          // 环心文字：宽度收紧 + scaleDown 兜底，大额（¥12.3万）也不会顶出环外
+          SizedBox(
+            width: 86,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('总支出',
+                      style: serifStyle.copyWith(
+                          fontSize: 11,
+                          color: Palette.textSub,
+                          letterSpacing: 2)),
+                  const SizedBox(height: 3),
+                  Text('¥${fmtCentsShort(totalCents)}',
+                      style: serifStyle.copyWith(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: Palette.expense,
+                          letterSpacing: -0.3)),
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -152,33 +165,36 @@ class DonutLegend extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
+                // 分类名占满剩余宽度：它必须在，且必须能被压缩（省略号），
+                // 否则大字号下又会被右侧两列挤成 0 宽
                 Expanded(
                   child: Text(
                     categoryMap[rows[i].categoryId]?.name ?? '未知',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: serifStyle.copyWith(
-                        fontSize: 12.5,
+                        fontSize: 12,
                         fontWeight: FontWeight.w600,
                         letterSpacing: 0.6),
                   ),
                 ),
+                // 占比与金额**紧挨**（只用 6px 间距）。
+                // 旧版金额那列写死 58 宽并右对齐，内容只有 ~30 宽 → 数字左
+                // 侧空出 28px，叠加分类名被压成 0 宽，就成了「占比和数字
+                // 间隔过远」。金额去掉固定宽度后，它的右边缘自然贴住卡片
+                // 右侧（Flex 把剩宽全给了分类名），两列间距恒定 6px。
                 Text(
                   totalCents == 0
                       ? '0%'
                       : '${(rows[i].cents / totalCents * 100).toStringAsFixed(1)}%',
                   style: serifStyle.copyWith(
-                      fontSize: 12.5, fontWeight: FontWeight.w700),
+                      fontSize: 11.5, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(width: 6),
-                SizedBox(
-                  width: 58,
-                  child: Text(
-                    '¥${fmtCentsShort(rows[i].cents)}',
-                    textAlign: TextAlign.right,
-                    style: const TextStyle(
-                        fontSize: 11.5, color: Palette.textSub),
-                  ),
+                Text(
+                  '¥${fmtCentsShort(rows[i].cents)}',
+                  style: const TextStyle(
+                      fontSize: 10.5, color: Palette.textSub),
                 ),
               ],
             ),

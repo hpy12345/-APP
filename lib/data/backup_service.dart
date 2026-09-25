@@ -4,10 +4,13 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:sqflite/sqflite.dart';
 
 import '../models/backup.dart';
 import '../utils/dates.dart';
+import 'app_db.dart';
 import 'bill_repository.dart';
+import 'storage_stat.dart';
 
 /// 备份与恢复服务。
 ///
@@ -97,6 +100,42 @@ class BackupService {
   Future<BackupDto> readAutoBackup(File f) async {
     final raw = await f.readAsString();
     return parseBackupAsync(raw);
+  }
+
+  /// 本机存储体积：SQLite 主库 + 自动备份目录。
+  ///
+  /// 只读文件大小（`File.lengthSync()`），不读内容、不外传 —— 与「零权限
+  /// 纯离线」的隐私口径一致。任何一步失败都退化成 0，不让「关于」页
+  /// 因为一个数字拿不到就崩掉。
+  Future<StorageStat> stat() async {
+    var dbBytes = 0;
+    try {
+      final dir = await getDatabasesPath();
+      final f = File(p.join(dir, AppDb.name));
+      if (f.existsSync()) dbBytes = f.lengthSync();
+    } catch (_) {
+      // ignore: avoid_print
+      print('[BackupService] 读取数据库体积失败');
+    }
+
+    var autoBytes = 0;
+    var autoCount = 0;
+    try {
+      for (final f in (await _autoDir()).listSync().whereType<File>()) {
+        if (!f.path.endsWith('.json')) continue;
+        autoBytes += f.lengthSync();
+        autoCount++;
+      }
+    } catch (_) {
+      // ignore: avoid_print
+      print('[BackupService] 读取自动备份体积失败');
+    }
+
+    return StorageStat(
+      dbBytes: dbBytes,
+      autoBackupBytes: autoBytes,
+      autoBackupCount: autoCount,
+    );
   }
 
   Future<Directory> _autoDir() async {

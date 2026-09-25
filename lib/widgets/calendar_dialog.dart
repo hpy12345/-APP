@@ -558,6 +558,10 @@ class _CalendarDialogState extends State<_CalendarDialog> {
   }
 
   // ── 底部：图例 + 快捷按钮 ───────────────────────────────
+  //
+  // 图例（日粒度：支出 / 收入 / 都有）**必须单行**：折行会把日历底部顶高、
+  // 挤压日期网格。这里用 FittedBox(scaleDown) 兜底 —— 系统字号放大时宁可整体
+  // 缩一点也不换行；右侧按钮同时收窄（见 _footBtn），把宽度让给图例。
   Widget _buildFoot() {
     final now = DateTime.now();
     return Column(
@@ -567,42 +571,49 @@ class _CalendarDialogState extends State<_CalendarDialog> {
         Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // 图例放进 Expanded + Wrap：系统字体放大后会自动折成两行，
-            // 而不是把右侧按钮挤到贴脸（原实现两者之间只有一个 Spacer）。
             Expanded(
-              child: widget.grain == CalendarGrain.day
-                  ? Wrap(
-                      spacing: 9,
-                      runSpacing: 4,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        _legendItem(const LinearGradient(
-                            colors: [Palette.expense, Palette.expense]), '支出'),
-                        _legendItem(const LinearGradient(
-                            colors: [Palette.income, Palette.income]), '收入'),
-                        _legendItem(const LinearGradient(
-                            colors: [Palette.expense, Palette.income],
-                            stops: [0.5, 0.5]), '都有'),
-                      ],
-                    )
-                  : Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 5,
-                          height: 5,
-                          decoration: const BoxDecoration(
-                              shape: BoxShape.circle, color: Palette.gold),
-                        ),
-                        const SizedBox(width: 5),
-                        const Text('有记账', style: _legendStyle),
-                      ],
-                    ),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: _legend(),
+              ),
             ),
-            const SizedBox(width: 14),
+            const SizedBox(width: 10),
             ..._footButtons(now),
           ],
         ),
+      ],
+    );
+  }
+
+  Widget _legend() {
+    if (widget.grain != CalendarGrain.day) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 5,
+            height: 5,
+            decoration: const BoxDecoration(
+                shape: BoxShape.circle, color: Palette.gold),
+          ),
+          const SizedBox(width: 5),
+          const Text('有记账', style: _legendStyle),
+        ],
+      );
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _legendItem(const LinearGradient(
+            colors: [Palette.expense, Palette.expense]), '支出'),
+        const SizedBox(width: 9),
+        _legendItem(const LinearGradient(
+            colors: [Palette.income, Palette.income]), '收入'),
+        const SizedBox(width: 9),
+        _legendItem(const LinearGradient(
+            colors: [Palette.expense, Palette.income],
+            stops: [0.5, 0.5]), '都有'),
       ],
     );
   }
@@ -625,6 +636,16 @@ class _CalendarDialogState extends State<_CalendarDialog> {
   }
 
   List<Widget> _footButtons(DateTime now) {
+    // 日粒度只留「今天」：原来的「本月」＝跳当月 1 号，与「今天」几乎重复，
+    // 还占着宽度把图例挤到折行（用户反馈：日粒度下这个按钮没用）。
+    if (widget.grain == CalendarGrain.day) {
+      return [
+        _footBtn('今天', Palette.brandSoft, () {
+          widget.onPickDate?.call(_todayInt);
+          Navigator.of(context).pop();
+        }),
+      ];
+    }
     if (widget.grain == CalendarGrain.month) {
       return [
         _footBtn('本月', Palette.brandSoft, () {
@@ -633,22 +654,9 @@ class _CalendarDialogState extends State<_CalendarDialog> {
         }),
       ];
     }
-    if (widget.grain == CalendarGrain.year) {
-      return [
-        _footBtn('今年', Palette.brandSoft, () {
-          widget.onPickYear?.call(now.year);
-          Navigator.of(context).pop();
-        }),
-      ];
-    }
     return [
-      _footBtn('本月', Colors.transparent, () {
-        widget.onPickDate?.call(monthKeyDay(_todayMonth, 1));
-        Navigator.of(context).pop();
-      }),
-      const SizedBox(width: 7),
-      _footBtn('今天', Palette.brandSoft, () {
-        widget.onPickDate?.call(_todayInt);
+      _footBtn('今年', Palette.brandSoft, () {
+        widget.onPickYear?.call(now.year);
         Navigator.of(context).pop();
       }),
     ];
@@ -663,17 +671,18 @@ class _CalendarDialogState extends State<_CalendarDialog> {
         borderRadius: BorderRadius.circular(6),
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          // 收窄：水平内边距 14 → 10、字号 12 → 11.5，宽度让给左侧图例
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(6),
             border: Border.all(color: Palette.line),
           ),
           child: Text(label,
               style: serifStyle.copyWith(
-                  fontSize: 12,
+                  fontSize: 11.5,
                   fontWeight: FontWeight.w600,
                   color: highlight ? Palette.brand : Palette.textSub,
-                  letterSpacing: 1.2)),
+                  letterSpacing: 1)),
         ),
       ),
     );

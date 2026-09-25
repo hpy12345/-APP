@@ -1,24 +1,67 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../data/bill_repository.dart';
 import '../theme/palette.dart';
+import '../utils/money.dart';
 
 /// 年视图：12 个月支出 / 收入双柱图（直译模拟版 renderYearChart）。
 /// 高度按全年峰值归一，当月朱砂下划线标记，高度动画 550ms。
-class YearBars extends StatelessWidget {
+///
+/// 点任意一列 → 选中该月，柱子加朱砂浅底高亮，下方读出条给出该月
+/// 支出 / 收入的具体金额。默认选中峰值月（全年无记账时落在当月），
+/// 所以读出条任何时候都有内容，不需要「点一下试试」的提示文案。
+class YearBars extends StatefulWidget {
   final List<MonthSum> months; // 长度 12
   final int year;
 
   const YearBars({super.key, required this.months, required this.year});
 
   @override
+  State<YearBars> createState() => _YearBarsState();
+}
+
+class _YearBarsState extends State<YearBars> {
+  late int _sel;
+
+  @override
+  void initState() {
+    super.initState();
+    _sel = _defaultIndex();
+  }
+
+  @override
+  void didUpdateWidget(covariant YearBars old) {
+    super.didUpdateWidget(old);
+    if (old.year != widget.year) _sel = _defaultIndex();
+  }
+
+  /// 默认选中：峰值月；全年为空则落在当月（看的不是当年 → 1 月）
+  int _defaultIndex() {
+    var best = -1;
+    var bestVal = 0;
+    for (var i = 0; i < widget.months.length; i++) {
+      final v = math.max(widget.months[i].expense, widget.months[i].income);
+      if (v > bestVal) {
+        bestVal = v;
+        best = i;
+      }
+    }
+    if (best >= 0) return best;
+    final now = DateTime.now();
+    return widget.year == now.year ? now.month - 1 : 0;
+  }
+
+  @override
   Widget build(BuildContext context) {
     var max = 1;
-    for (final m in months) {
+    for (final m in widget.months) {
       if (m.expense > max) max = m.expense;
       if (m.income > max) max = m.income;
     }
     final now = DateTime.now();
+    final sel = widget.months[_sel];
 
     return Column(
       children: [
@@ -30,10 +73,11 @@ class YearBars extends StatelessWidget {
               for (var i = 0; i < 12; i++)
                 Expanded(
                   child: _MonthCol(
-                    month: i + 1,
-                    sum: months[i],
+                    sum: widget.months[i],
                     max: max,
-                    isCurrent: year == now.year && i + 1 == now.month,
+                    isCurrent: widget.year == now.year && i + 1 == now.month,
+                    selected: i == _sel,
+                    onTap: () => setState(() => _sel = i),
                   ),
                 ),
             ],
@@ -49,14 +93,76 @@ class YearBars extends StatelessWidget {
                     textAlign: TextAlign.center,
                     style: serifStyle.copyWith(
                         fontSize: 10.5,
-                        color: year == now.year && i == now.month
+                        color: i - 1 == _sel
                             ? Palette.brand
-                            : Palette.textSub,
-                        fontWeight: year == now.year && i == now.month
+                            : (widget.year == now.year && i == now.month)
+                                ? Palette.brand
+                                : Palette.textSub,
+                        fontWeight: (i - 1 == _sel ||
+                                (widget.year == now.year && i == now.month))
                             ? FontWeight.w700
                             : FontWeight.w400)),
               ),
           ],
+        ),
+        const SizedBox(height: 12),
+        _MonthReadout(month: _sel + 1, sum: sel),
+      ],
+    );
+  }
+}
+
+/// 选中月份的读数条（点柱子后看这里的具体值）
+class _MonthReadout extends StatelessWidget {
+  final int month;
+  final MonthSum sum;
+
+  const _MonthReadout({required this.month, required this.sum});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF5EEE1),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Palette.line),
+      ),
+      child: Row(
+        children: [
+          Text('$month 月',
+              style: serifStyle.copyWith(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1,
+                  color: Palette.brand)),
+          const SizedBox(width: 12),
+          Expanded(child: _cell('支出', sum.expense, Palette.expense)),
+          Expanded(child: _cell('收入', sum.income, Palette.income)),
+        ],
+      ),
+    );
+  }
+
+  Widget _cell(String label, int cents, Color color) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2)),
+        ),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text('$label ¥${fmtCents(cents)}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: serifStyle.copyWith(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: Palette.text,
+                  letterSpacing: 0.2)),
         ),
       ],
     );
@@ -64,53 +170,71 @@ class YearBars extends StatelessWidget {
 }
 
 class _MonthCol extends StatelessWidget {
-  final int month;
   final MonthSum sum;
   final int max;
   final bool isCurrent;
+  final bool selected;
+  final VoidCallback onTap;
 
   const _MonthCol({
-    required this.month,
     required this.sum,
     required this.max,
     required this.isCurrent,
+    required this.selected,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        Expanded(
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              _Bar(
-                  cents: sum.expense,
-                  max: max,
-                  gradient: const LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0xFFC9503F), Color(0xFF8D3227)])),
-              const SizedBox(width: 2),
-              _Bar(
-                  cents: sum.income,
-                  max: max,
-                  gradient: const LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0xFF6D9D76), Color(0xFF3F6A4C)])),
-            ],
-          ),
+    // 整列都可点（含柱子上方的空白），否则只有细柱子能点到，手感很差
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 1),
+        decoration: selected
+            ? BoxDecoration(
+                color: const Color(0x149E4034),
+                borderRadius: BorderRadius.circular(5),
+              )
+            : null,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            Expanded(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  _Bar(
+                      cents: sum.expense,
+                      max: max,
+                      gradient: const LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Color(0xFFC9503F), Color(0xFF8D3227)])),
+                  const SizedBox(width: 2),
+                  _Bar(
+                      cents: sum.income,
+                      max: max,
+                      gradient: const LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Color(0xFF6D9D76), Color(0xFF3F6A4C)])),
+                ],
+              ),
+            ),
+            // 当月朱砂下划线（选中态由整列底色表达，两者可叠加）
+            Container(
+              height: 2,
+              margin: const EdgeInsets.only(top: 2),
+              color: isCurrent
+                  ? const Color(0x809E4034)
+                  : (selected ? const Color(0x339E4034) : Colors.transparent),
+            ),
+          ],
         ),
-        // 当月朱砂下划线
-        Container(
-          height: 2,
-          margin: const EdgeInsets.only(top: 2),
-          color: isCurrent ? const Color(0x809E4034) : Colors.transparent,
-        ),
-      ],
+      ),
     );
   }
 }

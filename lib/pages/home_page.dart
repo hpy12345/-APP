@@ -497,14 +497,16 @@ class _DayBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final v = vm.billView;
-    final rng = vm.dataRange;
     final monthMode = v.mode == 'month';
     final isCurrent = monthMode
         ? v.month == todayMonthKey()
         : v.date == todayInt();
 
-    final canPrev =
-        monthMode ? v.month != rng.minMonth : v.date != rng.minDate;
+    // 下限用 vm.browseMin（至少可回看 12 个月），不是 rng.minDate：
+    // 空账本时 DataRange 的 minDate 就是今天，直接照搬会让两个箭头永远禁用。
+    final canPrev = monthMode
+        ? v.month.compareTo(vm.browseMinMonth) > 0
+        : v.date > vm.browseMinDate;
     final canNext = monthMode
         ? v.month != todayMonthKey()
         : v.date != todayInt();

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 
+import '../data/storage_stat.dart';
 import '../theme/palette.dart';
 import '../utils/dates.dart';
 import '../viewmodel/ledger_view_model.dart';
@@ -15,8 +16,29 @@ import '../widgets/toast.dart';
 /// - 导出：JSON 全量（含分类配置），SAF 系统文件选择器保存，零权限
 /// - 导入：合并（按 uuid 去重）或覆盖（清空后导入，二次确认）
 /// - 自动备份：应用私有目录 latest 快照 + 每日留档（≤31 份）
-class DataPage extends StatelessWidget {
+/// - 存储体积：SQLite 主库 + 自动备份目录的实际字节数（异步取，读完刷新）
+class DataPage extends StatefulWidget {
   const DataPage({super.key});
+
+  @override
+  State<DataPage> createState() => _DataPageState();
+}
+
+class _DataPageState extends State<DataPage> {
+  /// 存储体积；null = 还在统计
+  StorageStat? _stat;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStat();
+  }
+
+  Future<void> _loadStat() async {
+    final vm = context.read<LedgerViewModel>();
+    final s = await vm.storageStat();
+    if (mounted) setState(() => _stat = s);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -31,7 +53,7 @@ class DataPage extends StatelessWidget {
             children: [
               // 头部
               Padding(
-                padding: const EdgeInsets.fromLTRB(6, 4, 20, 10),
+                padding: const EdgeInsets.fromLTRB(6, 4, 8, 10),
                 child: Row(
                   children: [
                     IconButton(
@@ -44,6 +66,13 @@ class DataPage extends StatelessWidget {
                             fontSize: 17,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 3)),
+                    const Spacer(),
+                    IconButton(
+                      tooltip: '重新统计体积',
+                      icon: const Icon(Icons.refresh,
+                          size: 20, color: Palette.textSub),
+                      onPressed: _loadStat,
+                    ),
                   ],
                 ),
               ),
@@ -66,6 +95,13 @@ class DataPage extends StatelessWidget {
                                   : '${fmtDateDash(rng.minDate)} ~ ${fmtDateDash(rng.maxDate)}',
                             ),
                             _infoRow('存储位置', '本机 SQLite（纯离线，零权限）'),
+                            _infoRow('存储体积', _fmtStat((s) => fmtBytes(s.totalBytes))),
+                            _infoRow('主库', _fmtStat((s) => fmtBytes(s.dbBytes))),
+                            _infoRow(
+                              '自动备份',
+                              _fmtStat((s) =>
+                                  '${fmtBytes(s.autoBackupBytes)} · ${s.autoBackupCount} 份'),
+                            ),
                           ],
                         ),
                       ),
@@ -146,6 +182,12 @@ class DataPage extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// 体积行取值：异步读完之前显示「统计中…」
+  String _fmtStat(String Function(StorageStat) f) {
+    final s = _stat;
+    return s == null ? '统计中…' : f(s);
   }
 
   Widget _actionRow({
