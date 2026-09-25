@@ -35,6 +35,9 @@ class Seed {
     LedgerCategory(id: 'borrow', name: '借入', icon: '📥', bg: _cf(0xDCEBE6), type: 'income', sort: 16),
     LedgerCategory(id: 'collect', name: '收回欠款', icon: '💵', bg: _cf(0xDCEAE0), type: 'income', sort: 17),
     LedgerCategory(id: 'refund', name: '退款', icon: '↩️', bg: _cf(0xE2EAE4), type: 'income', sort: 18),
+    // 收入侧的「其他」：支出侧本来就有，收入侧缺一个兜底分类
+    // （id 用 other_in，不能与支出侧 'other' 撞主键）
+    LedgerCategory(id: 'other_in', name: '其他', icon: '📦', bg: _cf(0xEAE5DC), type: 'income', sort: 19),
   ];
 
   static int _cf(int rgb) => _c << 24 | rgb;

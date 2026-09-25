@@ -112,7 +112,10 @@ class _YearBarsState extends State<YearBars> {
   }
 }
 
-/// 选中月份的读数条（点柱子后看这里的具体值）
+/// 选中月份的读数条（点柱子后看这里的具体值）。
+///
+/// 布局：支出、收入各占一行，月份居中夹在两行中央（两侧描金短线）——
+/// 三个信息挤一行时，大字号下两个金额都会被迫省略号，分行后每行都能给足宽度。
 class _MonthReadout extends StatelessWidget {
   final int month;
   final MonthSum sum;
@@ -122,49 +125,69 @@ class _MonthReadout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: const Color(0xFFF5EEE1),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: Palette.line),
       ),
-      child: Row(
+      child: Column(
         children: [
-          Text('$month 月',
-              style: serifStyle.copyWith(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1,
-                  color: Palette.brand)),
-          const SizedBox(width: 12),
-          Expanded(child: _cell('支出', sum.expense, Palette.expense)),
-          Expanded(child: _cell('收入', sum.income, Palette.income)),
+          _row('支出', sum.expense, Palette.expense),
+          _monthLine(),
+          _row('收入', sum.income, Palette.income),
         ],
       ),
     );
   }
 
-  Widget _cell(String label, int cents, Color color) {
+  Widget _row(String label, int cents, Color color) {
     return Row(
-      mainAxisSize: MainAxisSize.min,
       children: [
         Container(
           width: 7,
           height: 7,
-          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2)),
+          decoration:
+              BoxDecoration(color: color, borderRadius: BorderRadius.circular(2)),
         ),
-        const SizedBox(width: 6),
-        Flexible(
-          child: Text('$label ¥${fmtCents(cents)}',
+        const SizedBox(width: 7),
+        Text(label,
+            style: serifStyle.copyWith(
+                fontSize: 12, color: Palette.textSub, letterSpacing: 1)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text('¥${fmtCents(cents)}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
               style: serifStyle.copyWith(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600,
-                  color: Palette.text,
-                  letterSpacing: 0.2)),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.2)),
         ),
       ],
+    );
+  }
+
+  /// 月份行：居中，两侧各一条描金短线
+  Widget _monthLine() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          const Expanded(child: Divider(height: 1, color: Color(0x4DB08D4F))),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Text('$month 月',
+                style: serifStyle.copyWith(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.5,
+                    color: Palette.brand)),
+          ),
+          const Expanded(child: Divider(height: 1, color: Color(0x4DB08D4F))),
+        ],
+      ),
     );
   }
 }

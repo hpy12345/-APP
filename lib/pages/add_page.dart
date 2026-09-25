@@ -32,6 +32,7 @@ class _AddPageState extends State<AddPage> {
   late final TextEditingController _amountCtrl;
   final FocusNode _amountFocus = FocusNode();
   bool _wasActive = false;
+  int _syncedEntryRev = 0;
 
   @override
   void initState() {
@@ -39,21 +40,48 @@ class _AddPageState extends State<AddPage> {
     final vm = context.read<LedgerViewModel>();
     _noteCtrl = TextEditingController(text: vm.form.note);
     _amountCtrl = TextEditingController(text: vm.form.buffer);
+    _syncedEntryRev = vm.formEntryRev;
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final vm = context.read<LedgerViewModel>();
+    final active = vm.currentTab == 1;
+
+    // 表单被整体替换（点 ➕ 开始新账 / 从账单点进来编辑）→ 把输入框对齐过去。
+    // 用 formEntryRev 而不是 editingUuid：新增→新增时后者一直是 null，
+    // 输入框里的旧金额清不掉。
+    if (vm.formEntryRev != _syncedEntryRev) {
+      _syncedEntryRev = vm.formEntryRev;
+      _setCtrl(_amountCtrl, vm.form.buffer);
+      _setCtrl(_noteCtrl, vm.form.note);
+    }
+
     // 切进记账页时自动聚焦金额框（系统键盘随即弹出，省掉一次点击）。
     // 只在「刚切进来」那一帧做：切回账单页后 _wasActive 复位，
     // 用户在页内手动收起键盘不会被强行唤起。
-    final active = context.read<LedgerViewModel>().currentTab == 1;
     if (active && !_wasActive) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _amountFocus.requestFocus();
       });
     }
+    // 离开记账页：主动释放焦点。
+    // 不释放的话焦点一直是金额框 —— 切回账单/统计页键盘不落，
+    // 而且**弹层关闭（如日历、数据与关于）时系统会把焦点还给它，
+    // 键盘莫名其妙自己弹出来**（用户反馈的两个现象都是这个原因）。
+    if (!active && _wasActive) {
+      FocusManager.instance.primaryFocus?.unfocus();
+    }
     _wasActive = active;
+  }
+
+  /// 覆盖写入并把光标放到末尾（直接赋 .text 会让光标回到开头）
+  void _setCtrl(TextEditingController c, String text) {
+    c.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
   }
 
   @override
@@ -87,7 +115,7 @@ class _AddPageState extends State<AddPage> {
         child: SafeArea(
           child: Column(
             children: [
-              _titleBar(),
+              _titleBar(vm),
               // 键盘弹起后剩余高度有限：上方内容可滚动，任何字号下都不会被裁
               Expanded(
                 child: SingleChildScrollView(
@@ -112,12 +140,12 @@ class _AddPageState extends State<AddPage> {
   }
 
   // ── 标题行 ──
-  Widget _titleBar() {
+  Widget _titleBar(LedgerViewModel vm) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
       child: Row(
         children: [
-          Text('记一笔',
+          Text(vm.form.editing ? '改一笔' : '记一笔',
               style: serifStyle.copyWith(
                   fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: 3)),
           const Spacer(),
@@ -281,7 +309,7 @@ class _AddPageState extends State<AddPage> {
     );
   }
 
-  // ── 底栏：已选摘要 + 清空 + 保存 ──
+  // ── 底栏：已选摘要 + 保存 ──
   Widget _bottomBar(LedgerViewModel vm) {
     final form = vm.form;
     final cat = vm.categoryMap[form.categoryId]?.name ?? '未选';
@@ -296,13 +324,13 @@ class _AddPageState extends State<AddPage> {
         ),
         border: Border(top: BorderSide(color: Palette.line)),
       ),
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 7, 16, 7),
       child: Row(
         children: [
           Expanded(
             child: Text.rich(
               TextSpan(
-                text: '已选「',
+                text: form.editing ? '修改「' : '已选「',
                 style: const TextStyle(fontSize: 12, color: Palette.textSub),
                 children: [
                   TextSpan(
@@ -320,37 +348,16 @@ class _AddPageState extends State<AddPage> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          const SizedBox(width: 8),
-          _plainChip('清空', () {
-            vm.clearForm();
-            _noteCtrl.clear();
-            _amountCtrl.clear();
-          }),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           SizedBox(
-            width: 92,
-            height: 44,
-            child: _SaveSeal(onTap: () => _save(vm)),
+            width: 72,
+            height: 36,
+            child: _SaveSeal(
+              label: form.editing ? '更 新' : '保 存',
+              onTap: () => _save(vm),
+            ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _plainChip(String label, VoidCallback onTap) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(5),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-        decoration: BoxDecoration(
-          color: const Color(0xB3FDFAF4),
-          borderRadius: BorderRadius.circular(5),
-          border: Border.all(color: Palette.line),
-        ),
-        child: Text(label,
-            style: serifStyle.copyWith(
-                fontSize: 12.5, color: Palette.textSub, letterSpacing: 1.2)),
       ),
     );
   }
@@ -416,6 +423,9 @@ class _AddPageState extends State<AddPage> {
   }
 
   Future<void> _pickDate(BuildContext context, LedgerViewModel vm) async {
+    // 先放掉焦点再开弹层：否则弹层关闭时系统会把焦点还回金额框，
+    // 键盘自己弹出来（编辑备注后点日期就能复现）。
+    FocusManager.instance.primaryFocus?.unfocus();
     final picked = await showDatePicker(
       context: context,
       initialDate: dtOf(vm.form.dateInt),
@@ -428,12 +438,13 @@ class _AddPageState extends State<AddPage> {
 
   void _save(LedgerViewModel vm) {
     vm.setFormNote(_noteCtrl.text);
+    final wasEditing = vm.form.editing;
     final r = vm.saveBill();
     if (r == SaveResult.ok) {
       _noteCtrl.clear();
       _amountCtrl.clear();
-      FocusScope.of(context).unfocus();
-      showAppToast(context, '已保存');
+      FocusManager.instance.primaryFocus?.unfocus();
+      showAppToast(context, wasEditing ? '已更新' : '已保存');
       // 直译模拟版：保存后 340ms 回首页并定位该账单所在日
       Future.delayed(const Duration(milliseconds: 340), () {
         if (mounted) vm.switchTab(0);
@@ -472,18 +483,22 @@ class _AmountField extends StatelessWidget {
     required this.onChanged,
   });
 
-  static const double _digitMax = 39;
-  static const double _digitMin = 20;
-  static const double _lineHeight = 47;
-  static const double _yenSize = 25;
-  static const double _yenGap = 5;
+  /// 字号上限由 39 收到 30、货币符号同比例收到 19：
+  /// 39 在 1.3 倍系统字号下一行占了 61px（整屏高度紧张，观感也过大）。
+  static const double _digitMax = 30;
+  static const double _digitMin = 16;
+
+  /// 行盒高 / 字号（沿用旧版 47/39 的比例，改字号时行距同比缩）
+  static const double _lineFactor = 47 / 39;
+  static const double _yenSize = 19;
+  static const double _yenGap = 4;
   static const Color _placeholder = Color(0xFFCDC2AD);
 
   TextStyle _digitStyle(double fs, Color color) => serifStyle.copyWith(
         fontSize: fs,
         fontWeight: FontWeight.w700,
         letterSpacing: -1,
-        height: _lineHeight / _digitMax,
+        height: _lineFactor,
         color: color,
       );
 
@@ -509,7 +524,7 @@ class _AmountField extends StatelessWidget {
         fontSize: _yenSize,
         fontWeight: FontWeight.w700,
         letterSpacing: -0.3,
-        height: _lineHeight / _digitMax,
+        height: _lineFactor,
         color: isExpense ? Palette.expense : Palette.income,
       );
 
@@ -531,6 +546,9 @@ class _AmountField extends StatelessWidget {
         style: _digitStyle(fs, color),
         cursorColor: Palette.brand,
         cursorWidth: 2,
+        // 光标高度跟当前字号走（默认取整行行盒，比数字高一大截）。
+        // 0.8 倍字号 ≈ 数字的实际字面高，看起来就是「和数字同大小」。
+        cursorHeight: scaler.scale(fs) * 0.8,
         decoration: InputDecoration(
           isDense: true,
           contentPadding: EdgeInsets.zero,
@@ -587,10 +605,12 @@ class _AmountInputFormatter extends TextInputFormatter {
   }
 }
 
-/// 保存键：朱砂印章（原自绘键盘上的保存键，现在固定在底栏）
+/// 保存键：朱砂印章（原自绘键盘上的保存键，现在固定在底栏）。
+/// 编辑已有账单时标签变「更 新」，尺寸比首版收小一圈。
 class _SaveSeal extends StatelessWidget {
+  final String label;
   final VoidCallback onTap;
-  const _SaveSeal({required this.onTap});
+  const _SaveSeal({required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -620,9 +640,9 @@ class _SaveSeal extends StatelessWidget {
             ],
           ),
           alignment: Alignment.center,
-          child: Text('保 存',
+          child: Text(label,
               style: serifStyle.copyWith(
-                  fontSize: 16,
+                  fontSize: 14,
                   fontWeight: FontWeight.w600,
                   color: const Color(0xFFFDF6EC),
                   letterSpacing: 2)),

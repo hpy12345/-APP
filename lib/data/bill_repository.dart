@@ -16,6 +16,7 @@ abstract class BillRepository {
 
   Future<List<Bill>> loadBills(); // 未删除
   Future<void> insertBill(Bill bill);
+  Future<void> updateBill(Bill bill); // 按 uuid 原地更新（编辑已有账单）
   Future<void> softDelete(int id); // 删除可撤销 / 云同步预留
   Future<void> undelete(int id);
 
@@ -107,6 +108,16 @@ class SqfliteBillRepository implements BillRepository {
     final db = await _db;
     await db.insert('bill', bill.toRow(),
         conflictAlgorithm: ConflictAlgorithm.replace); // uuid 幂等
+  }
+
+  @override
+  Future<void> updateBill(Bill bill) async {
+    final db = await _db;
+    // 按 uuid 定位，并**去掉行 id**：编辑不该换掉行的自增标识
+    // （软删 / 撤销删除都是按 id 做的，id 一变就找不回原行了）。
+    // 也不能用 insert(replace)：那会「删旧行 + 插新行」，id 必然改变。
+    final row = bill.toRow()..remove('id');
+    await db.update('bill', row, where: 'uuid = ?', whereArgs: [bill.uuid]);
   }
 
   @override

@@ -9,19 +9,24 @@ import '../utils/money.dart';
 
 /// 账单行（复刻模拟版 .bill）。
 ///
+/// 交互：
+/// - **点一下行内容 = 编辑这一笔**（灌回记账页，保存即原地更新）
+/// - 左滑露出「删除」按钮 → 再点一下才真的删
+///
 /// 删除交互：**左滑露出「删除」按钮 → 再点一下才真的删**。
 /// 之前用 `Dismissible`，划到底立刻删除，误触即丢数据（删除虽可撤销，
 /// 但用户明确要求「再点一下」）。
 ///
 /// 手势细节：
 /// - 拖动跟手，松手按「位移 > 1/3 宽度」或「甩动速度」吸附到展开 / 收起
-/// - 展开后点行内容 = 收起（不误删）；点右侧删除条 = 执行删除
+/// - 展开后点行内容 = 收起（不误删、不误进编辑）；点右侧删除条 = 执行删除
 /// - 删除仍走调用方给的软删 + 撤销 Toast 通道
 class BillTile extends StatefulWidget {
   final Bill bill;
   final LedgerCategory? category;
   final bool showDivider; // 组内非首行显示左侧缩进分割线
   final ValueChanged<Bill> onDelete;
+  final ValueChanged<Bill> onTap; // 点击进入编辑
 
   const BillTile({
     super.key,
@@ -29,6 +34,7 @@ class BillTile extends StatefulWidget {
     required this.category,
     this.showDivider = false,
     required this.onDelete,
+    required this.onTap,
   });
 
   @override
@@ -149,7 +155,12 @@ class _BillTileState extends State<BillTile>
                 // AnimatedBuilder 的缓存 child，动画过程中不会重建，条件会在
                 // 构建时被冻结成 null。改为在回调里实时判断。
                 onTap: () {
-                  if (_opened) _close();
+                  if (_opened) {
+                    _close(); // 展开态下先收起，避免误进编辑
+                  } else {
+                    HapticFeedback.selectionClick();
+                    widget.onTap(widget.bill);
+                  }
                 },
                 child: _BillRow(bill: widget.bill, category: widget.category),
               ),

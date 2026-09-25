@@ -30,6 +30,9 @@ Future<void> showLedgerCalendar(
   ValueChanged<String>? onPickMonth,
   ValueChanged<int>? onPickYear,
 }) {
+  // 开弹层前先放掉焦点：焦点若还挂在记账页的金额输入框上，弹层关闭时
+  // 系统会把焦点还给它 → 点完日期回来键盘自己弹出来（用户反馈的现象）。
+  FocusManager.instance.primaryFocus?.unfocus();
   return showGeneralDialog(
     context: context,
     barrierDismissible: true,

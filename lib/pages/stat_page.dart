@@ -105,10 +105,15 @@ class _StatPageState extends State<StatPage> {
                         tooltip: '数据管理',
                         icon: const Icon(Icons.inventory_2_outlined,
                             color: Palette.textSub, size: 22),
-                        onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (_) => const DataPage()),
-                        ),
+                        onPressed: () {
+                          // 先放焦点再开新页：焦点若还挂在记账页的金额框上，
+                          // 这个页面 pop 时系统会把焦点还给它 → 键盘自己弹出来
+                          FocusManager.instance.primaryFocus?.unfocus();
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) => const DataPage()),
+                          );
+                        },
                       ),
                     ],
                   ),

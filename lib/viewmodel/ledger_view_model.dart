@@ -23,7 +23,16 @@ class AddFormState {
   String note = '';
   int dateInt = todayInt();
 
+  /// 正在编辑的账单 uuid；null = 新增
+  String? editingUuid;
+
+  /// 原账单是负金额（冲销，如基金浮亏补仓 −240 元）。
+  /// 系统数字键盘输不出负号，编辑时保留原符号，否则「改个备注」
+  /// 就会把 −240 悄悄变成 +240。
+  bool negate = false;
+
   bool get hasValue => buffer.isNotEmpty && buffer != '0';
+  bool get editing => editingUuid != null;
 }
 
 /// 首页流水视图（直译模拟版 state.billView）
@@ -76,6 +85,12 @@ class LedgerViewModel extends ChangeNotifier {
   /// 表单态变更：只通知 formRev（只有记账页订阅），
   /// 首页 / 统计页不会被高频按键拖着重建。
   void _bumpForm() => formRev.value++;
+
+  /// 「整表被外部替换」的序号：`beginNewEntry` / `startEdit` 各 +1。
+  ///
+  /// 记账页据此把输入框内容与表单对齐 —— 不能用 `editingUuid` 判断，
+  /// 因为「新增 → 新增」时它一直是 null，输入框里的旧金额不会被清掉。
+  int formEntryRev = 0;
 
   /// 数据态变更（账单 / 预算 / 分类 / 视图游标）统一出口：广播全量通知。
   /// 与 [_bumpForm] 相对 —— 只有这类低频变更才值得让三页一起刷新。
@@ -152,8 +167,9 @@ class LedgerViewModel extends ChangeNotifier {
     wealth = await repo.wealth();
   }
 
-  // ═══ 表单：键盘输入（直译模拟版 handleKey） ═════════════
+  // ═══ 表单：新增 / 编辑 / 日期 与 金额缓冲 ═══════════════
   // 注意：本节的写入一律走 _bumpForm()，不广播全量通知 —— 见 formRev 注释。
+  // 例外是 beginNewEntry / startEdit：那两处是「整表替换 + 切页」，需要广播。
 
   void setFormType(String type) {
     form.type = type;
@@ -177,10 +193,37 @@ class LedgerViewModel extends ChangeNotifier {
     _bumpForm();
   }
 
-  void clearForm() {
+  /// 开始一笔新账（点标签栏 ➕）：清空表单，**日期回到今天**。
+  ///
+  /// 日期每次都回到今天，是因为用户反馈「改过日期后关掉再进来，日期还停在
+  /// 上次那天」—— 记一笔的默认语义就是今天，要改当天再改。
+  void beginNewEntry() {
+    // 已经在记账页且是新增态 → 再点 ➕ 不动输入（避免误触把正在输的金额清掉）
+    if (currentTab == 1 && !form.editing) return;
+    form.editingUuid = null;
+    form.negate = false;
     form.buffer = '';
     form.note = '';
-    _bumpForm();
+    form.dateInt = todayInt();
+    formEntryRev++;
+    currentTab = 1;
+    formRev.value++;
+    _notifyData();
+  }
+
+  /// 进入编辑：把该笔账单灌回表单并切到记账页（账单行点一下 → 重新编辑）
+  void startEdit(Bill bill) {
+    form.editingUuid = bill.uuid;
+    form.negate = bill.amount < 0;
+    form.type = bill.type;
+    form.categoryId = bill.categoryId;
+    form.buffer = centsToBuffer(bill.amount);
+    form.note = bill.note;
+    form.dateInt = bill.date;
+    formEntryRev++;
+    currentTab = 1;
+    formRev.value++;
+    _notifyData();
   }
 
   /// 金额缓冲写入（记账页的 TextField → 状态）。
@@ -206,17 +249,49 @@ class LedgerViewModel extends ChangeNotifier {
     }
   }
 
-  /// 保存当前表单为账单
+  /// 保存当前表单（新增或更新，看 [AddFormState.editingUuid]）
   SaveResult saveBill() {
     final cents = bufferToCents(form.buffer);
     if (form.buffer.isEmpty || cents <= 0) return SaveResult.needAmount;
     if (!categoryMap.containsKey(form.categoryId)) return SaveResult.needCategory;
 
     final now = DateTime.now().millisecondsSinceEpoch;
+    final amount = form.negate ? -cents : cents;
+
+    // ── 编辑已有账单：按 uuid 原地更新，id / createdAt 保持不变 ──
+    final editing = form.editingUuid;
+    if (editing != null) {
+      final idx = bills.indexWhere((b) => b.uuid == editing);
+      if (idx >= 0) {
+        final updated = bills[idx].copyWith(
+          type: form.type,
+          amount: amount,
+          categoryId: form.categoryId,
+          note: form.note.trim(),
+          date: form.dateInt,
+          updatedAt: now,
+        );
+        final next = bills.toList()..[idx] = updated;
+        next.sort(_byDateDesc);
+        bills = next;
+        _mutate(() async {
+          await repo.updateBill(updated);
+          bills = await repo.loadBills();
+        });
+        _resetFormAfterSave(updated.date);
+        return SaveResult.ok;
+      }
+      // 目标已不在列表里（编辑期间被删）→ 记日志并退化成新增，不静默丢数据
+      // ignore: avoid_print
+      print('[VM] 待编辑账单已不存在，转为新增：$editing');
+      form.editingUuid = null;
+    }
+
+    // ── 新增 ──
     final bill = Bill(
       uuid: 'b${now.toRadixString(36)}-${_seq++}', // 时间戳 + 会话内自增，保证唯一
       type: form.type,
-      amount: cents,
+      amount: amount,
       categoryId: form.categoryId,
       note: form.note.trim(),
       date: form.dateInt,
@@ -231,15 +306,22 @@ class LedgerViewModel extends ChangeNotifier {
       bills = await repo.loadBills();
     });
 
-    // 重置表单（保留类型与日期，方便连续记账）+ 回首页定位该账单所在日
+    _resetFormAfterSave(bill.date);
+    return SaveResult.ok;
+  }
+
+  /// 落库后的收尾：清空金额/备注、退出编辑态、把流水视图定位到该笔所在日
+  /// （类型与日期保留，方便连续记账 —— 但下次点 ➕ 会走 [beginNewEntry] 回到今天）
+  void _resetFormAfterSave(int date) {
+    form.editingUuid = null;
+    form.negate = false;
     form.buffer = '';
     form.note = '';
     billView.mode = 'day';
-    billView.date = bill.date;
-    billView.month = monthKeyOf(bill.date);
+    billView.date = date;
+    billView.month = monthKeyOf(date);
     formRev.value++;
     _notifyData();
-    return SaveResult.ok;
   }
 
   /// 账单排序：日期倒序 → 记录时刻倒序（与 repo.loadBills 的 ORDER BY 一致）

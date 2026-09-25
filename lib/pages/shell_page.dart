@@ -115,6 +115,8 @@ class _ShellPageState extends State<ShellPage> {
         bottomNavigationBar: _TabBar(
           currentIndex: vm.currentTab,
           onTap: vm.switchTab,
+          // 中间格走 beginNewEntry：清空表单 + 日期回到今天（并切到记账页）
+          onAdd: vm.beginNewEntry,
         ),
       ),
     );
@@ -230,8 +232,13 @@ class _AddSlot extends StatelessWidget {
 class _TabBar extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
+  final VoidCallback onAdd;
 
-  const _TabBar({required this.currentIndex, required this.onTap});
+  const _TabBar({
+    required this.currentIndex,
+    required this.onTap,
+    required this.onAdd,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -244,7 +251,7 @@ class _TabBar extends StatelessWidget {
       child: Row(
         children: [
           _tab(0, Icons.home_outlined, '账单'),
-          _AddSlot(active: currentIndex == 1, onTap: () => onTap(1)),
+          _AddSlot(active: currentIndex == 1, onTap: onAdd),
           _tab(2, Icons.pie_chart_outline, '统计'),
         ],
       ),
