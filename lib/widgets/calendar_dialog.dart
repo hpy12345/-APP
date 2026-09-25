@@ -98,9 +98,6 @@ class _CalendarDialogState extends State<_CalendarDialog> {
     _month = widget.initMonth;
   }
 
-  bool get _isYearGrain => widget.grain == CalendarGrain.year;
-  bool get _isMonthGrain => widget.grain == CalendarGrain.month;
-
   int get _todayInt => todayInt();
   String get _todayMonth => todayMonthKey();
 

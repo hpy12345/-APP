@@ -207,10 +207,11 @@ Android 端 gradle 自动读取，无需改两处。
 
 - [ ] 首启引导 → 写入演示数据 → 首页三卡数值正确（净资产 = 现金 − 净债务）
 - [ ] 记一笔 → 340ms 回首页并定位该日 → 净资产/预算/统计同步刷新
-- [ ] 右滑删除 → 撤销恢复 → 再删除
+- [ ] 账单行**左滑露出「删除」→ 再点「删除」**才删除 → 撤销可恢复
+- [ ] 底部标签栏上下无黑边（含记账页键盘弹起时）
 - [ ] 日/月切换 + 日历选历史日期 + 翻页边界（最早账单日 ~ 今天）
+- [ ] 统计页月/年切换 + 点中间标签开日历选月/选年
 - [ ] 设预算 → 进度条 5 级色随用量变化
-- [ ] 统计页月/年切换 + 步进边界
 - [ ] 导出备份 → 卸载重装 → 导入恢复 → 数据一致
 - [ ] 安装 v1 → 升级新版（改 version）→ 旧数据完整 + `onUpgrade` 迁移生效
 
@@ -243,3 +244,29 @@ Android 端 gradle 自动读取，无需改两处。
 **未做编译验证**：本机无 Flutter / JDK / Android SDK，以上均为静态审核结论。
 已完成的替代验证：29 个 `.dart` 文件括号/字符串结构平衡检查、6 个 XML 解析、工作流 YAML 结构检查 —— 全部通过。
 首次构建请按《安装与打包说明.md》第六章 8 项清单过一遍真机。
+
+---
+
+## 七、真机反馈修复（第二轮 · 2026-09-25）
+
+装机实测后用户反馈 11 项问题，逐项定位到代码事实后修复（`version: 1.0.0+2`）：
+
+| # | 现象 | 根因 | 修复 |
+|---|---|---|---|
+| 1 | 空账本提示不在屏幕中央 | 空态是滚动内容的一部分，只跟在日期栏下方 | 首页改 `CustomScrollView`，空态用 `SliverFillRemaining(hasScrollBody: false)` 撑满剩余视口并垂直居中 |
+| 2 | 账单页加号附近发黑 | **Scaffold 默认 `resizeToAvoidBottomInset: true`**，body 按 `viewInsets.bottom` 收窄，缝隙处露出 Flutter Surface 的未绘制区（真机为黑）；标签栏原为 `0xEB` 半透，叠在黑色上发灰 | 首页/统计页也关掉该开关（记账页本就是 false）；外壳 Scaffold 底色改不透明 `screenBg`，标签栏改不透明；主题 `scaffoldBackgroundColor` 兜底 |
+| 3 | 金额光标与数字不对齐 | 光标是 `Row(baseline)` 里的 `Container`，**无基线子项被 Flex 按 cross-start 摆放** → 光标整体高出数字 | 改为用 `TextPainter.computeDistanceToActualBaseline` 实测基线，`¥`/数字/光标三者在 `Stack` 里按度量定位，光标 bottom 边距 = 下伸缩部高度 |
+| 4 | 选中分类图标上边框被切 | 选中态 `AnimatedContainer` 上移 2px，而 `ListView` 视口从 0 开始 → 顶部 2px 被裁 | 分类列表顶部留 5px 内边距（高度 76→82） |
+| 5 | 备注/日期栏被下方遮挡 | 行高偏大，系统键盘弹起时压到输入行 | 行内边距 13→8、字号 15→14.5、标签 44px；金额卡内边距 17→12；整条输入区上移约 40px |
+| 6 | 账单页日/月按钮样式与统计页不一致 | 两页各写一套段控（金浅底高亮 vs 白卡抬起） | 抽出 `widgets/grain_switch.dart` 共用 |
+| 7 | 当月结余字号大于净资产 | 净资产有自适应降字号，大额时被压到 26 而结余固定 34 → 层级反转 | 净资产 44/下限 30、结余 28/下限 18，**恒有结余 < 净资产** |
+| 8 | 统计页不能选月份/年份 | 只有 `‹ ›` 步进器 | 步进器中间可点 → 复用日历；`CalendarGrain` 增加 `year`（12 年宫格），`showLedgerCalendar` 支持三种粒度 |
+| 9 | 日历「本月」紧贴图例「都有」 | 图例与按钮之间仅一个 `Spacer`，系统字体放大后 Spacer 被吃光 | 图例改 `Expanded + Wrap`（空间不足自动折行），并与按钮间固定留 14px |
+| 10 | 运行卡顿 | ① 记账页每次按键 `notifyListeners()` → 首页/统计页（含环形图、排行、双柱）整棵重建；② 宣纸底 260+ 条 `drawLine` 每帧重录；③ `billsOfView()` 每次 build 重复排序；④ 结余卡一次 build 扫两遍账单；⑤ 光标定时器在后台也跑 | ① VM 增 `formRev`（`ValueNotifier`），表单变化只通知它，记账页用 `ValueListenableBuilder` 订阅；② 宣纸底加 `RepaintBoundary` + `isComplex`；③ 去掉重复排序（`bills` 本就有序）；④ 单次扫描；⑤ 非当前页停掉定时器 |
+| 11 | 左划直接删除 | `Dismissible` 滑到底即 `onDismissed` | 改为自绘「左滑露出删除条 → 点一下才删」：跟手拖动 + 速度/位移吸附，展开后点行内容只收起；仍走软删 + 撤销 Toast |
+
+**验证方式**：从用户提供的两张真机截图做像素级反推（872×1920，按 FAB 直径 50dp 定标≈2.22px/dp）
+—— 量出黑带高度 82px≈37dp、标签栏上沿与 FAB 圆心重合于 `contentBottom`，据此锁定第 2 项根因；
+结合 Flutter 3.27.4 源码（`scaffold.dart` 的 `contentBottom = bottom − max(minInsets.bottom, bottomWidgetsHeight)`、
+flex.dart 的 baseline 分支、text_painter.dart 的 `computeDistanceToActualBaseline` 签名）确认修复方向。
+`flutter analyze` 在 CI 上通过（无新增 issue）。

@@ -494,8 +494,8 @@ class _Metric {
     )..layout(
         maxWidth:
             maxWidth.isFinite && maxWidth > 0 ? maxWidth : double.infinity);
-    final b = tp.computeDistanceToActualBaseline(TextBaseline.alphabetic) ??
-        tp.height * 0.8;
+    // computeDistanceToActualBaseline 是「行盒顶 → 基线」的距离（非空）
+    final b = tp.computeDistanceToActualBaseline(TextBaseline.alphabetic);
     return _Metric(tp.width, tp.height, b, tp.height - b);
   }
 }
