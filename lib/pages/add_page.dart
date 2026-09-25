@@ -6,7 +6,6 @@ import 'package:provider/provider.dart';
 import '../models/category.dart';
 import '../theme/palette.dart';
 import '../utils/dates.dart';
-import '../utils/money.dart';
 import '../viewmodel/ledger_view_model.dart';
 import '../widgets/number_keyboard.dart';
 import '../widgets/paper.dart';

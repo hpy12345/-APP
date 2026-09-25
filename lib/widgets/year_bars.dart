@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../data/bill_repository.dart';
 import '../theme/palette.dart';
-import '../utils/money.dart';
 
 /// 年视图：12 个月支出 / 收入双柱图（直译模拟版 renderYearChart）。
 /// 高度按全年峰值归一，当月朱砂下划线标记，高度动画 550ms。

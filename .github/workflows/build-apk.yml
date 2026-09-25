@@ -106,46 +106,65 @@ jobs:
         run: flutter analyze
         continue-on-error: true
 
-      # 通用包：任何机型都能装，体积略大（推荐个人直装用这个）
-      # tee 把日志留到文件，供下面的失败诊断步骤使用
+      # ── 构建 ───────────────────────────────────────────────
+      # 只出通用包（任何机型可装）。不再跑 --split-per-abi：
+      # 它对体积有帮助，但会让构建时间翻倍、失败面翻倍；个人直装用不上。
+      # 需要时本地执行：flutter build apk --release --split-per-abi
+      #
+      # continue-on-error：失败也先往下走，交给下面的「归位 + 诊断」步骤
+      # 暴露真实原因，并尽量把已经生成的 APK 抢救出来。
       - name: Build universal APK
+        id: build
         shell: bash
+        continue-on-error: true
         run: |
           set -o pipefail
           flutter build apk --release 2>&1 | tee "$RUNNER_TEMP/build.log"
 
-      # 构建失败时把日志尾部转成 annotation。
-      # 为什么要这么绕：Actions 的原始日志下载接口需要鉴权，
-      # 而 annotation 可通过公开 API 免鉴权读取 —— 这样报错能被外部直接看到，
-      # 不用手动截图/贴日志。annotation 有长度上限，只截最后 45 行。
-      - name: Surface build error as annotation
-        if: failure()
+      # 为什么需要这一步：
+      # Flutter 的 Gradle 插件是用
+      #     assembleTask.doLast { project.copy { from <AGP 产物目录>/<outputFileName> ... } }
+      # 把 APK 拷到 build/app/outputs/flutter-apk/ 的。
+      # 而 Gradle 的 copy 在**源文件不存在时静默跳过、不报错** —— 于是会出现
+      # 「Gradle 成功退出、日志里没有任何报错、但 flutter build 报
+      #   Gradle build failed to produce an .apk file」这种极难定位的现象。
+      # 这里把 AGP 输出目录里的 APK 找出来归位，并把目录结构暴露成 annotation。
+      - name: Recover APK & diagnose
+        if: steps.build.outcome == 'failure'
         shell: bash
         run: |
-          f="$RUNNER_TEMP/build.log"
-          [ -f "$f" ] || exit 0
-          # 既抓「关键字行」（可能出现在日志任何位置，例如 Flutter Gradle 插件
-          # 打印的 SDKS/NDK 版本校验错误），也抓结尾 35 行兜底。
+          set +e
+          mkdir -p build/app/outputs/flutter-apk
           {
-            grep -nE "FAILURE:|What went wrong|error:|Error:|ERROR|requires Android|depend on a different|compile against|Permission denied|Minimum supported Gradle|Could not|not found" "$f" | head -30 || true
-            echo "===== tail ====="
-            tail -35 "$f"
-          } | tr -d '\r' | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}' > "$RUNNER_TEMP/ann.txt"
-          # 必须压成「一行」—— workflow command 按行解析，多行只有首行算注解内容。
-          echo "::error title=Build failed::$(cat "$RUNNER_TEMP/ann.txt")"
+            echo "build.log 行数: $(wc -l < "$RUNNER_TEMP/build.log")"
+            echo "--- AGP outputs 目录树 ---"
+            find android/app/build/outputs -maxdepth 4 2>/dev/null | head -40
+            echo "--- outputs 里的 apk ---"
+            find android/app/build/outputs -type f -name '*.apk' 2>/dev/null | head -20
+            echo "--- flutter-apk 目录（构建前）---"
+            ls -la build/app/outputs/flutter-apk 2>&1 | head -10
+          } > "$RUNNER_TEMP/diag.txt" 2>&1
+          # -n 不覆盖已有文件；只在 AGP 输出目录里找，避免把 intermediates 里的半成品拷进来
+          find android/app/build/outputs -type f -name '*.apk' -exec cp -v -n {} build/app/outputs/flutter-apk/ \; >> "$RUNNER_TEMP/diag.txt" 2>&1
+          echo "--- 归位后 flutter-apk ---" >> "$RUNNER_TEMP/diag.txt"
+          ls -la build/app/outputs/flutter-apk >> "$RUNNER_TEMP/diag.txt" 2>&1
+          head -c 30000 "$RUNNER_TEMP/diag.txt" | tr -d '\r' | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}' > "$RUNNER_TEMP/ann.txt"
+          echo "::warning title=构建诊断::$(cat "$RUNNER_TEMP/ann.txt")"
 
-      # 分 ABI 包：每台设备只带自己那份 so，体积约 −40%
-      - name: Build split-per-ABI APKs
-        run: flutter build apk --release --split-per-abi
+      - name: Verify APK exists
+        shell: bash
+        run: |
+          ls -la build/app/outputs/flutter-apk/ || true
+          if [ ! -f build/app/outputs/flutter-apk/app-release.apk ]; then
+            echo "::error::没有产出 app-release.apk —— 见上一条『构建诊断』注解里的目录结构"
+            exit 1
+          fi
+          du -h build/app/outputs/flutter-apk/app-release.apk
 
-      - name: Upload APKs
+      - name: Upload APK
         uses: actions/upload-artifact@v5
         with:
           name: ledger-apk
           if-no-files-found: error
           retention-days: 30
-          path: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
-            build/app/outputs/flutter-apk/app-x86_64-release.apk
+          path: build/app/outputs/flutter-apk/*.apk
