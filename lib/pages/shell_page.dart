@@ -94,7 +94,12 @@ class _ShellPageState extends State<ShellPage> {
         if (!didPop) vm.switchTab(0);
       },
       child: Scaffold(
-        backgroundColor: Colors.transparent,
+        // 必须是不透明底色：Flutter 的 Surface 本身不透明，凡是 App 没画到的
+        // 区域在真机上会露出黑色（表现为底部一条黑带 / 中间缺口周围发黑）。
+        // 这里兜一层宣纸色，任何缝隙都只会是同色，不会发黑。
+        backgroundColor: Palette.screenBg,
+        // 自绘键盘自带高度，禁止系统键盘再上推整页（否则底部会挤出缝隙）
+        resizeToAvoidBottomInset: false,
         // 注意：不开 extendBody —— 记账页自绘键盘需要贴在标签栏「上方」
         //（与模拟版布局一致：pages 区结束 → tabbar → 安全区）
         body: IndexedStack(
@@ -201,7 +206,8 @@ class _TabBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BottomAppBar(
-      color: const Color(0xEBF7F1E6),
+      // 不透明：原来的 0xEB 半透会让材质与背后的黑色混合发灰
+      color: const Color(0xFFF7F1E6),
       elevation: 0,
       height: 62,
       padding: const EdgeInsets.symmetric(horizontal: 6),

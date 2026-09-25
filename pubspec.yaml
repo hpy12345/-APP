@@ -9,7 +9,7 @@ publish_to: "none"
 #   - major  ：重大改版 / 破坏性变更    → build +1
 # 注意：build(versionCode) 必须单调递增，否则商店/安装器拒绝覆盖升级。
 # Android 端 app/build.gradle.kts 会自动读取此处的 version，无需改两处。
-version: 1.0.0+1
+version: 1.0.0+2
 
 environment:
   sdk: ">=3.4.0 <4.0.0"

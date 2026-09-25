@@ -59,7 +59,9 @@ class LedgerApp extends StatelessWidget {
           secondary: Palette.gold,
           surface: Palette.paper,
         ),
-        scaffoldBackgroundColor: Colors.transparent,
+        // 兜底底色：绝不用 transparent —— Flutter Surface 不透明，
+        // 没画到的区域会露出黑色（真机上表现为底部黑带）。
+        scaffoldBackgroundColor: Palette.screenBg,
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.transparent,
           elevation: 0,

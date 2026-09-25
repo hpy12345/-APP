@@ -4,15 +4,22 @@ import '../theme/palette.dart';
 
 /// 宣纸底：竖直暖白渐变 + 细密横纹（复刻模拟版 .screen 背景）。
 /// 全局挂在 Scaffold 底层，子页面一律透明背景。
+///
+/// 性能：横纹是 260+ 条 `drawLine`，而 CustomPaint 每帧重录绘制指令，
+/// 因此套一层 [RepaintBoundary] 把它固化成独立图层 —— 滚动时不再重复录。
 class PaperBackground extends StatelessWidget {
   final Widget child;
   const PaperBackground({super.key, required this.child});
 
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(
-      painter: _PaperPainter(),
-      child: child,
+    return RepaintBoundary(
+      child: CustomPaint(
+        painter: _PaperPainter(),
+        isComplex: true,
+        willChange: false,
+        child: child,
+      ),
     );
   }
 }

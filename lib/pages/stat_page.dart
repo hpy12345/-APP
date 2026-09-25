@@ -7,7 +7,9 @@ import '../utils/dates.dart';
 import '../utils/money.dart';
 import '../viewmodel/ledger_view_model.dart';
 import '../widgets/bar_rank.dart';
+import '../widgets/calendar_dialog.dart';
 import '../widgets/donut_chart.dart';
+import '../widgets/grain_switch.dart';
 import '../widgets/paper.dart';
 import '../widgets/year_bars.dart';
 import 'data_page.dart';
@@ -78,6 +80,8 @@ class _StatPageState extends State<StatPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 记账页按键只通知 formRev（见 LedgerViewModel），不会广播全量通知，
+    // 所以这里不会被键盘输入拖着重算图表。
     final vm = context.watch<LedgerViewModel>();
     final rng = vm.dataRange;
     _clampToRange(rng);
@@ -104,6 +108,8 @@ class _StatPageState extends State<StatPage> {
 
     return Scaffold(
       backgroundColor: Colors.transparent,
+      // 与首页同理：开着会让 body 按 viewInsets 收窄，底部露出黑缝
+      resizeToAvoidBottomInset: false,
       body: PaperBackground(
         child: SafeArea(
           child: SingleChildScrollView(
@@ -157,23 +163,15 @@ class _StatPageState extends State<StatPage> {
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Row(
                     children: [
-                      // 月 / 年 段控
-                      Container(
-                        padding: const EdgeInsets.all(3.5),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFECE2D0),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Palette.line),
-                        ),
-                        child: Row(
-                          children: [
-                            _grainBtn('月', 'month'),
-                            _grainBtn('年', 'year'),
-                          ],
-                        ),
+                      // 月 / 年 段控 —— 与账单页共用 GrainSwitch，样式统一
+                      GrainSwitch(
+                        labels: const ['月', '年'],
+                        selected: isYear ? 1 : 0,
+                        onChanged: (i) => setState(
+                            () => _grain = i == 1 ? 'year' : 'month'),
                       ),
                       const SizedBox(width: 10),
-                      // 步进器
+                      // 步进器（中间可点，打开日历直接跳到某月/某年）
                       Expanded(
                         child: Container(
                           padding: const EdgeInsets.symmetric(
@@ -187,16 +185,38 @@ class _StatPageState extends State<StatPage> {
                             children: [
                               _stepBtn('‹', canPrev, () => _shift(-1)),
                               Expanded(
-                                child: Text(
-                                  isYear
-                                      ? '$_year 年'
-                                      : '$_year 年 $_month 月',
-                                  textAlign: TextAlign.center,
-                                  style: serifStyle.copyWith(
-                                      fontSize: 14.5,
-                                      fontWeight: FontWeight.w700,
-                                      letterSpacing: 1.4,
-                                      color: Palette.brand),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(5),
+                                  onTap: () => _pickPeriod(vm, isYear),
+                                  child: Padding(
+                                    padding:
+                                        const EdgeInsets.symmetric(vertical: 4),
+                                    child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Flexible(
+                                          child: Text(
+                                            isYear
+                                                ? '$_year 年'
+                                                : '$_year 年 $_month 月',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: serifStyle.copyWith(
+                                                fontSize: 14.5,
+                                                fontWeight: FontWeight.w700,
+                                                letterSpacing: 1.4,
+                                                color: Palette.brand),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 5),
+                                        const Icon(
+                                            Icons.calendar_month_outlined,
+                                            size: 15,
+                                            color: Palette.textSub),
+                                      ],
+                                    ),
+                                  ),
                                 ),
                               ),
                               _stepBtn('›', canNext, () => _shift(1)),
@@ -307,23 +327,23 @@ class _StatPageState extends State<StatPage> {
     return '峰值 ¥${fmtCentsShort(max)}';
   }
 
-  Widget _grainBtn(String label, String grain) {
-    final on = _grain == grain;
-    return GestureDetector(
-      onTap: () => setState(() => _grain = grain),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
-        decoration: BoxDecoration(
-          color: on ? Palette.card : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          border: on ? Border.all(color: const Color(0x4DB08D4F)) : null,
-        ),
-        child: Text(label,
-            style: serifStyle.copyWith(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: on ? Palette.brand : Palette.textSub)),
-      ),
+  /// 点步进器中间 → 开日历：月粒度选月份（年历 12 宫格），年粒度选年份。
+  Future<void> _pickPeriod(LedgerViewModel vm, bool isYear) async {
+    await showLedgerCalendar(
+      context,
+      grain: isYear ? CalendarGrain.year : CalendarGrain.month,
+      initYear: _year,
+      initMonth: _month,
+      selectedDate: todayInt(),
+      selectedMonth: _curKey,
+      bills: vm.bills,
+      onPickMonth: (mk) {
+        setState(() {
+          _year = int.parse(mk.substring(0, 4));
+          _month = int.parse(mk.substring(5, 7));
+        });
+      },
+      onPickYear: (y) => setState(() => _year = y),
     );
   }
 

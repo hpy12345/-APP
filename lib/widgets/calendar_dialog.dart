@@ -4,23 +4,31 @@ import '../models/bill.dart';
 import '../theme/palette.dart';
 import '../utils/dates.dart';
 
+/// 日历粒度
+/// - [day]   → 月历（选日期）
+/// - [month] → 年历 12 宫格（选月份）
+/// - [year]  → 12 年宫格（选年份，统计页年粒度用）
+enum CalendarGrain { day, month, year }
+
 /// 自定义日历弹层（复刻模拟版 .cal）：
 /// - 日粒度 → 月历：三色记账圆点 / 今天描边 / 选中印章 / 未来禁用
 /// - 月粒度 → 年历：12 宫格 + 记账金点
+/// - 年粒度 → 年份宫格：12 年一格
 /// - 游标可自由前后翻（下限 2000 年，上限今天）
 ///
 /// 「本月 / 今天」语义按落地方案 P0 修正：日粒度下「本月」= 跳当月 1 号，
 /// 与「今天」区分开（模拟版两按钮行为重复，属已知局限 #11）。
 Future<void> showLedgerCalendar(
   BuildContext context, {
-  required bool monthGrain,
+  required CalendarGrain grain,
   required int initYear,
   required int initMonth,
   required int selectedDate,
   required String selectedMonth,
   required List<Bill> bills,
-  required ValueChanged<int> onPickDate,
-  required ValueChanged<String> onPickMonth,
+  ValueChanged<int>? onPickDate,
+  ValueChanged<String>? onPickMonth,
+  ValueChanged<int>? onPickYear,
 }) {
   return showGeneralDialog(
     context: context,
@@ -39,7 +47,7 @@ Future<void> showLedgerCalendar(
       );
     },
     pageBuilder: (context, animation, secondary) => _CalendarDialog(
-      monthGrain: monthGrain,
+      grain: grain,
       initYear: initYear,
       initMonth: initMonth,
       selectedDate: selectedDate,
@@ -47,29 +55,32 @@ Future<void> showLedgerCalendar(
       bills: bills,
       onPickDate: onPickDate,
       onPickMonth: onPickMonth,
+      onPickYear: onPickYear,
     ),
   );
 }
 
 class _CalendarDialog extends StatefulWidget {
-  final bool monthGrain;
+  final CalendarGrain grain;
   final int initYear;
   final int initMonth;
   final int selectedDate;
   final String selectedMonth;
   final List<Bill> bills;
-  final ValueChanged<int> onPickDate;
-  final ValueChanged<String> onPickMonth;
+  final ValueChanged<int>? onPickDate;
+  final ValueChanged<String>? onPickMonth;
+  final ValueChanged<int>? onPickYear;
 
   const _CalendarDialog({
-    required this.monthGrain,
+    required this.grain,
     required this.initYear,
     required this.initMonth,
     required this.selectedDate,
     required this.selectedMonth,
     required this.bills,
-    required this.onPickDate,
-    required this.onPickMonth,
+    this.onPickDate,
+    this.onPickMonth,
+    this.onPickYear,
   });
 
   @override
@@ -87,12 +98,20 @@ class _CalendarDialogState extends State<_CalendarDialog> {
     _month = widget.initMonth;
   }
 
+  bool get _isYearGrain => widget.grain == CalendarGrain.year;
+  bool get _isMonthGrain => widget.grain == CalendarGrain.month;
+
   int get _todayInt => todayInt();
   String get _todayMonth => todayMonthKey();
 
+  /// 年粒度下 12 年一屏的起始年
+  int get _blockStart => (_year ~/ 12) * 12;
+
   void _shift(int delta) {
     setState(() {
-      if (widget.monthGrain) {
+      if (widget.grain == CalendarGrain.year) {
+        _year = _blockStart + delta * 12;
+      } else if (widget.grain == CalendarGrain.month) {
         _year += delta;
       } else {
         var m = _month + delta;
@@ -109,13 +128,18 @@ class _CalendarDialogState extends State<_CalendarDialog> {
   }
 
   bool get _canPrev {
-    if (widget.monthGrain) return _year > calendarMinYear;
+    if (widget.grain == CalendarGrain.year) return _blockStart > calendarMinYear;
+    if (widget.grain == CalendarGrain.month) return _year > calendarMinYear;
     return _year > calendarMinYear || _month > 1;
   }
 
   bool get _canNext {
     final now = DateTime.now();
-    if (widget.monthGrain) return _year < now.year;
+    if (widget.grain == CalendarGrain.year) {
+      // 当前年所在的这一屏之后还有可见年份时才允许前进
+      return _blockStart + 12 <= now.year;
+    }
+    if (widget.grain == CalendarGrain.month) return _year < now.year;
     if (_year < now.year) return true;
     return _month < now.month;
   }
@@ -155,14 +179,18 @@ class _CalendarDialogState extends State<_CalendarDialog> {
             mainAxisSize: MainAxisSize.min,
             children: [
               _buildHead(),
-              if (!widget.monthGrain) ...[
+              if (widget.grain == CalendarGrain.day) ...[
                 const SizedBox(height: 8),
                 _buildWeekHeader(),
               ],
               const SizedBox(height: 6),
               Flexible(
                 child: SingleChildScrollView(
-                  child: widget.monthGrain ? _buildYearGrid() : _buildMonthGrid(),
+                  child: switch (widget.grain) {
+                    CalendarGrain.day => _buildDayGrid(),
+                    CalendarGrain.month => _buildMonthCells(),
+                    CalendarGrain.year => _buildYearCells(),
+                  },
                 ),
               ),
               const SizedBox(height: 10),
@@ -176,9 +204,11 @@ class _CalendarDialogState extends State<_CalendarDialog> {
 
   // ── 头部：标题 + 翻页 ───────────────────────────────────
   Widget _buildHead() {
-    final title = widget.monthGrain
-        ? '$_year年'
-        : '$_year年$_month月';
+    final title = switch (widget.grain) {
+      CalendarGrain.day => '$_year年$_month月',
+      CalendarGrain.month => '$_year年',
+      CalendarGrain.year => '$_blockStart - ${_blockStart + 11} 年',
+    };
     return Row(
       children: [
         Expanded(
@@ -239,7 +269,7 @@ class _CalendarDialogState extends State<_CalendarDialog> {
   }
 
   // ── 月历（选日期） ─────────────────────────────────────
-  Widget _buildMonthGrid() {
+  Widget _buildDayGrid() {
     final curKey = '$_year-${_month.toString().padLeft(2, '0')}';
 
     // 当月聚合：date → {exp, inc}
@@ -307,7 +337,7 @@ class _CalendarDialogState extends State<_CalendarDialog> {
         onTap: isFuture
             ? null
             : () {
-                widget.onPickDate(ds);
+                widget.onPickDate?.call(ds);
                 Navigator.of(context).pop();
               },
         child: Container(
@@ -368,7 +398,7 @@ class _CalendarDialogState extends State<_CalendarDialog> {
       Container(width: 4.5, height: 4.5, decoration: BoxDecoration(shape: BoxShape.circle, gradient: gradient));
 
   // ── 年历（选月份） ─────────────────────────────────────
-  Widget _buildYearGrid() {
+  Widget _buildMonthCells() {
     final monthsWithRecords = widget.bills.map((b) => monthKeyOf(b.date)).toSet();
     final cells = <Widget>[];
     for (var m = 1; m <= 12; m++) {
@@ -403,7 +433,7 @@ class _CalendarDialogState extends State<_CalendarDialog> {
         onTap: isFuture
             ? null
             : () {
-                widget.onPickMonth(mk);
+                widget.onPickMonth?.call(mk);
                 Navigator.of(context).pop();
               },
         child: Container(
@@ -448,46 +478,132 @@ class _CalendarDialogState extends State<_CalendarDialog> {
     );
   }
 
-  // ── 底部：图例 + 本月 / 今天 ─────────────────────────────
+  // ── 年份宫格（选年份） ─────────────────────────────────
+  Widget _buildYearCells() {
+    final now = DateTime.now();
+    final yearsWithRecords =
+        widget.bills.map((b) => b.date ~/ 10000).toSet();
+    final cells = <Widget>[];
+    for (var y = _blockStart; y < _blockStart + 12; y++) {
+      cells.add(_yearCell(y, now.year, yearsWithRecords.contains(y)));
+    }
+    return GridView.count(
+      crossAxisCount: 3,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: 8,
+      crossAxisSpacing: 8,
+      childAspectRatio: 1.9,
+      children: cells,
+    );
+  }
+
+  Widget _yearCell(int y, int nowYear, bool hasRecords) {
+    final isFuture = y > nowYear;
+    final isSel = y == _year;
+    final isNow = y == nowYear;
+
+    return Material(
+      color: isSel
+          ? Palette.brandSoft
+          : isNow
+              ? const Color(0xFFFDF6F2)
+              : Palette.card,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: isFuture
+            ? null
+            : () {
+                widget.onPickYear?.call(y);
+                Navigator.of(context).pop();
+              },
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: isSel
+                  ? const Color(0x4D9E4034)
+                  : isNow
+                      ? const Color(0x619E4034)
+                      : Palette.line,
+            ),
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Text('$y',
+                  style: serifStyle.copyWith(
+                      fontSize: 13,
+                      fontWeight: isSel ? FontWeight.w700 : FontWeight.w400,
+                      color: isSel
+                          ? Palette.brand
+                          : isFuture
+                              ? const Color(0xFFC9C0B0)
+                              : isNow
+                                  ? Palette.brand
+                                  : Palette.text)),
+              if (hasRecords && !isFuture)
+                Positioned(
+                  bottom: 5,
+                  child: Container(
+                    width: 4,
+                    height: 4,
+                    decoration: const BoxDecoration(
+                        shape: BoxShape.circle, color: Palette.gold),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── 底部：图例 + 快捷按钮 ───────────────────────────────
   Widget _buildFoot() {
+    final now = DateTime.now();
     return Column(
       children: [
         const Divider(height: 1, color: Palette.line),
         const SizedBox(height: 10),
         Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            _legendDot(const LinearGradient(colors: [Palette.expense, Palette.expense])),
-            const SizedBox(width: 3),
-            const Text('支出', style: _legendStyle),
-            const SizedBox(width: 10),
-            _legendDot(const LinearGradient(colors: [Palette.income, Palette.income])),
-            const SizedBox(width: 3),
-            const Text('收入', style: _legendStyle),
-            const SizedBox(width: 10),
-            _legendDot(const LinearGradient(
-                colors: [Palette.expense, Palette.income], stops: [0.5, 0.5])),
-            const SizedBox(width: 3),
-            const Text('都有', style: _legendStyle),
-            const Spacer(),
-            _footBtn('本月', Colors.transparent, () {
-              final now = DateTime.now();
-              if (widget.monthGrain) {
-                widget.onPickMonth(todayMonthKey());
-              } else {
-                // 语义修正（方案 P0）：日粒度「本月」= 当月 1 号
-                widget.onPickDate(now.year * 10000 + now.month * 100 + 1);
-              }
-              Navigator.of(context).pop();
-            }),
-            const SizedBox(width: 6),
-            _footBtn('今天', Palette.brandSoft, () {
-              if (widget.monthGrain) {
-                widget.onPickMonth(todayMonthKey());
-              } else {
-                widget.onPickDate(todayInt());
-              }
-              Navigator.of(context).pop();
-            }),
+            // 图例放进 Expanded + Wrap：系统字体放大后会自动折成两行，
+            // 而不是把右侧按钮挤到贴脸（原实现两者之间只有一个 Spacer）。
+            Expanded(
+              child: widget.grain == CalendarGrain.day
+                  ? Wrap(
+                      spacing: 9,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        _legendItem(const LinearGradient(
+                            colors: [Palette.expense, Palette.expense]), '支出'),
+                        _legendItem(const LinearGradient(
+                            colors: [Palette.income, Palette.income]), '收入'),
+                        _legendItem(const LinearGradient(
+                            colors: [Palette.expense, Palette.income],
+                            stops: [0.5, 0.5]), '都有'),
+                      ],
+                    )
+                  : Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 5,
+                          height: 5,
+                          decoration: const BoxDecoration(
+                              shape: BoxShape.circle, color: Palette.gold),
+                        ),
+                        const SizedBox(width: 5),
+                        const Text('有记账', style: _legendStyle),
+                      ],
+                    ),
+            ),
+            const SizedBox(width: 14),
+            ..._footButtons(now),
           ],
         ),
       ],
@@ -497,12 +613,54 @@ class _CalendarDialogState extends State<_CalendarDialog> {
   static const _legendStyle = TextStyle(
       fontSize: 11, color: Palette.textSub, letterSpacing: 1);
 
-  Widget _legendDot(Gradient g) => Container(
-      width: 5, height: 5, decoration: BoxDecoration(shape: BoxShape.circle, gradient: g));
+  Widget _legendItem(Gradient g, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+            width: 5,
+            height: 5,
+            decoration: BoxDecoration(shape: BoxShape.circle, gradient: g)),
+        const SizedBox(width: 4),
+        Text(label, style: _legendStyle),
+      ],
+    );
+  }
+
+  List<Widget> _footButtons(DateTime now) {
+    if (widget.grain == CalendarGrain.month) {
+      return [
+        _footBtn('本月', Palette.brandSoft, () {
+          widget.onPickMonth?.call(_todayMonth);
+          Navigator.of(context).pop();
+        }),
+      ];
+    }
+    if (widget.grain == CalendarGrain.year) {
+      return [
+        _footBtn('今年', Palette.brandSoft, () {
+          widget.onPickYear?.call(now.year);
+          Navigator.of(context).pop();
+        }),
+      ];
+    }
+    return [
+      _footBtn('本月', Colors.transparent, () {
+        widget.onPickDate?.call(monthKeyDay(_todayMonth, 1));
+        Navigator.of(context).pop();
+      }),
+      const SizedBox(width: 7),
+      _footBtn('今天', Palette.brandSoft, () {
+        widget.onPickDate?.call(_todayInt);
+        Navigator.of(context).pop();
+      }),
+    ];
+  }
 
   Widget _footBtn(String label, Color bg, VoidCallback onTap) {
+    final highlight = bg != Colors.transparent;
     return Material(
-      color: bg == Colors.transparent ? const Color(0xFFFAF5EA) : bg,
+      color: highlight ? bg : const Color(0xFFFAF5EA),
       borderRadius: BorderRadius.circular(6),
       child: InkWell(
         borderRadius: BorderRadius.circular(6),
@@ -517,7 +675,7 @@ class _CalendarDialogState extends State<_CalendarDialog> {
               style: serifStyle.copyWith(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: label == '今天' ? Palette.brand : Palette.textSub,
+                  color: highlight ? Palette.brand : Palette.textSub,
                   letterSpacing: 1.2)),
         ),
       ),

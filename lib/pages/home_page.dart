@@ -11,6 +11,7 @@ import '../widgets/bill_tile.dart';
 import '../widgets/budget_bar.dart';
 import '../widgets/calendar_dialog.dart';
 import '../widgets/fit_text.dart';
+import '../widgets/grain_switch.dart';
 import '../widgets/modal_input.dart';
 import '../widgets/paper.dart';
 import '../widgets/toast.dart';
@@ -18,31 +19,59 @@ import '../widgets/toast.dart';
 /// 首页 · 账单页
 ///
 /// 复刻模拟版：净资产卡（现金/债务拆解）→ 当月结余卡（预算 5 级预警）
-/// → 流水账（日/月双粒度 + 日历精确定位 + 滑删撤销）。
+/// → 流水账（日/月双粒度 + 日历精确定位 + 左滑二次确认删除）。
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
   @override
   Widget build(BuildContext context) {
+    // 说明：记账页每次按键只通知 formRev（见 LedgerViewModel），不再广播
+    // 全量通知，所以这里的 watch 不会被按键盘拖着重建 —— 那才是真机卡顿的主因。
     final vm = context.watch<LedgerViewModel>();
+    final items = vm.billsOfView();
+
     return Scaffold(
       backgroundColor: Colors.transparent,
+      // 关键：自绘键盘页面不需要系统键盘改布局；开着会让 Scaffold 依据
+      // viewInsets 收窄 body，底部与标签栏之间露出一条黑缝。
+      resizeToAvoidBottomInset: false,
       body: PaperBackground(
         child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _WealthCard(wealth: vm.wealth),
-                const SizedBox(height: 12),
-                _HeroCard(vm: vm),
-                const SizedBox(height: 18),
-                _DayBar(vm: vm),
-                const SizedBox(height: 9),
-                _BillArea(vm: vm),
-              ],
-            ),
+          child: CustomScrollView(
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                sliver: SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _WealthCard(wealth: vm.wealth),
+                      const SizedBox(height: 12),
+                      _HeroCard(vm: vm),
+                      const SizedBox(height: 18),
+                      _DayBar(vm: vm),
+                    ],
+                  ),
+                ),
+              ),
+              // 空态用 SliverFillRemaining 撑满剩余视口：这样「今天还没有账单」
+              // 才是屏幕（而非滚动内容）的垂直居中。
+              if (items.isEmpty)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _EmptyBillHint(
+                    monthMode: vm.billView.mode == 'month',
+                    date: vm.billView.date,
+                  ),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 9, 16, 24),
+                  sliver: SliverToBoxAdapter(
+                    child: _BillList(vm: vm, items: items),
+                  ),
+                ),
+            ],
           ),
         ),
       ),
@@ -132,13 +161,16 @@ class _WealthCard extends StatelessWidget {
                 const SizedBox(height: 7),
                 Row(
                   children: [
-                    // 左：净资产大数字
+                    // 左：净资产大数字。
+                    // 下限 30 是为了「任何时候都大于当月结余的上限 28」——
+                    // 之前下限 26，大额净资产被自适应缩小后会比下面那张卡的
+                    // 结余还小，层级就反了。
                     Expanded(
                       child: FitText(
                         text:
                             '${net < 0 ? '-' : ''}¥${fmtCents(net)}',
                         maxFontSize: 44,
-                        minFontSize: 26,
+                        minFontSize: 30,
                         style: serifStyle.copyWith(
                           fontWeight: FontWeight.w700,
                           letterSpacing: -1,
@@ -147,7 +179,7 @@ class _WealthCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 14),
+                    const SizedBox(width: 10),
                     // 右：拆解「现金 / 债务」
                     Container(
                       padding: const EdgeInsets.only(left: 14),
@@ -228,7 +260,8 @@ class _HeroCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final mk = vm.activeMonth;
     final list = vm.billsOfMonth(mk);
-    final m = vm.monthSum(mk);
+    // 一次扫描出收支（原来 monthSum 会再扫一遍同一批账单）
+    final m = sumUp(list);
     final budget = vm.budgetOf(mk);
     final pct = budget > 0 ? m.expense / budget * 100 : 0.0;
     final left = budget - m.expense;
@@ -315,16 +348,16 @@ class _HeroCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 7),
-                // 结余大数字
+                // 结余大数字：上限 28 明确压在净资产（≥30）之下
                 FitText(
                   text:
                       '${m.balance < 0 ? '-' : ''}¥${fmtCents(m.balance)}',
-                  maxFontSize: 34,
-                  minFontSize: 22,
+                  maxFontSize: 28,
+                  minFontSize: 18,
                   style: serifStyle.copyWith(
-                    fontSize: 34,
+                    fontSize: 28,
                     fontWeight: FontWeight.w700,
-                    letterSpacing: -1,
+                    letterSpacing: -0.8,
                     height: 1.08,
                     color: m.balance < 0 ? Palette.expense : Palette.income,
                   ),
@@ -486,7 +519,7 @@ class _DayBar extends StatelessWidget {
             height: 40,
             onTap: () => showLedgerCalendar(
               context,
-              monthGrain: monthMode,
+              grain: monthMode ? CalendarGrain.month : CalendarGrain.day,
               // 月粒度下必须用 v.month 而非 v.date：翻月只改 month，
               // 沿用 v.date 会让日历永远停在「切到月粒度那一刻」的月份。
               initYear: monthMode
@@ -542,36 +575,13 @@ class _DayBar extends StatelessWidget {
         const SizedBox(width: 7),
         _navBtn('›', canNext, () => vm.shiftView(1)),
         const SizedBox(width: 7),
-        // 日 / 月 段控
-        _CardButton(
-          height: 40,
-          onTap: () => vm.switchGrain(monthMode ? 'day' : 'month'),
-          child: Row(
-            children: [
-              _grainCell('日', !monthMode, () => vm.switchGrain('day')),
-              Container(width: 1, height: 24, color: Palette.line),
-              _grainCell('月', monthMode, () => vm.switchGrain('month')),
-            ],
-          ),
+        // 日 / 月 段控 —— 与统计页共用 GrainSwitch，样式统一
+        GrainSwitch(
+          labels: const ['日', '月'],
+          selected: monthMode ? 1 : 0,
+          onChanged: (i) => vm.switchGrain(i == 1 ? 'month' : 'day'),
         ),
       ],
-    );
-  }
-
-  Widget _grainCell(String label, bool on, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        width: 30,
-        alignment: Alignment.center,
-        color: on ? Palette.goldSoft : Colors.transparent,
-        child: Text(label,
-            style: serifStyle.copyWith(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.5,
-                color: on ? Palette.gold : Palette.textSub)),
-      ),
     );
   }
 
@@ -629,104 +639,114 @@ class _CardButton extends StatelessWidget {
 
 // ═══ 账单区 ══════════════════════════════════════════════
 
-class _BillArea extends StatelessWidget {
-  final LedgerViewModel vm;
-  const _BillArea({required this.vm});
+/// 空态：由外层 SliverFillRemaining 给足剩余高度，这里垂直居中。
+class _EmptyBillHint extends StatelessWidget {
+  final bool monthMode;
+  final int date;
+
+  const _EmptyBillHint({required this.monthMode, required this.date});
 
   @override
   Widget build(BuildContext context) {
-    final v = vm.billView;
-    final items = vm.billsOfView();
-
-    if (items.isEmpty) {
-      final monthMode = v.mode == 'month';
-      return Column(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const SizedBox(height: 30),
           const Text('🗒️', style: TextStyle(fontSize: 38)),
           const SizedBox(height: 12),
           Text(
             monthMode
                 ? '本月还没有账单\n点击下方「+」记一笔'
-                : '${v.date == todayInt() ? '今天' : fmtDateCn(v.date)}还没有账单\n点击下方「+」记一笔',
+                : '${date == todayInt() ? '今天' : fmtDateCn(date)}还没有账单\n点击下方「+」记一笔',
             textAlign: TextAlign.center,
             style: const TextStyle(
                 fontSize: 13, color: Palette.textSub, height: 1.9),
           ),
-          const SizedBox(height: 30),
         ],
-      );
-    }
+      ),
+    );
+  }
+}
 
-    // 小计
+/// 账单列表：月模式按日期分组，日模式平铺
+class _BillList extends StatelessWidget {
+  final LedgerViewModel vm;
+  final List<Bill> items;
+
+  const _BillList({required this.vm, required this.items});
+
+  @override
+  Widget build(BuildContext context) {
     final sum = sumUp(items);
     final strip = DaySumStrip(sum: sum, count: items.length);
 
-    // 月模式：按日期分组；日模式：平铺
-    if (v.mode == 'month') {
-      final groups = <int, List<Bill>>{};
-      for (final b in items) {
-        groups.putIfAbsent(b.date, () => []).add(b);
-      }
-      final dates = groups.keys.toList()..sort((a, b) => b.compareTo(a));
+    if (vm.billView.mode != 'month') {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           strip,
-          for (final d in dates) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(5, 4, 5, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      d == todayInt()
-                          ? '今天'
-                          : '${fmtDateCn(d)} ${dateLabel(d)}',
-                      style: serifStyle.copyWith(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 1.8),
-                    ),
-                  ),
-                  Text(
-                    _groupSummary(groups[d]!),
-                    style: const TextStyle(
-                        fontSize: 11.5,
-                        color: Palette.textSub,
-                        letterSpacing: 0.3),
-                  ),
-                ],
+          BillListCard(children: [
+            for (var i = 0; i < items.length; i++)
+              BillTile(
+                key: ValueKey('b-${items[i].uuid}'),
+                bill: items[i],
+                category: vm.categoryMap[items[i].categoryId],
+                showDivider: i > 0,
+                onDelete: (bill) => _delete(context, bill),
               ),
-            ),
-            BillListCard(children: [
-              for (var i = 0; i < groups[d]!.length; i++)
-                BillTile(
-                  bill: groups[d]![i],
-                  category: vm.categoryMap[groups[d]![i].categoryId],
-                  showDivider: i > 0,
-                  onDelete: (bill) => _delete(context, bill),
-                ),
-            ]),
-            const SizedBox(height: 16),
-          ],
+          ]),
         ],
       );
     }
 
+    final groups = <int, List<Bill>>{};
+    for (final b in items) {
+      groups.putIfAbsent(b.date, () => []).add(b);
+    }
+    final dates = groups.keys.toList()..sort((a, b) => b.compareTo(a));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         strip,
-        BillListCard(children: [
-          for (var i = 0; i < items.length; i++)
-            BillTile(
-              bill: items[i],
-              category: vm.categoryMap[items[i].categoryId],
-              showDivider: i > 0,
-              onDelete: (bill) => _delete(context, bill),
+        for (final d in dates) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(5, 4, 5, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    d == todayInt()
+                        ? '今天'
+                        : '${fmtDateCn(d)} ${dateLabel(d)}',
+                    style: serifStyle.copyWith(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.8),
+                  ),
+                ),
+                Text(
+                  _groupSummary(groups[d]!),
+                  style: const TextStyle(
+                      fontSize: 11.5,
+                      color: Palette.textSub,
+                      letterSpacing: 0.3),
+                ),
+              ],
             ),
-        ]),
+          ),
+          BillListCard(children: [
+            for (var i = 0; i < groups[d]!.length; i++)
+              BillTile(
+                key: ValueKey('b-${groups[d]![i].uuid}'),
+                bill: groups[d]![i],
+                category: vm.categoryMap[groups[d]![i].categoryId],
+                showDivider: i > 0,
+                onDelete: (bill) => _delete(context, bill),
+              ),
+          ]),
+          const SizedBox(height: 16),
+        ],
       ],
     );
   }

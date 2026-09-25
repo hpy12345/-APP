@@ -63,6 +63,23 @@ class LedgerViewModel extends ChangeNotifier {
   bool needsOnboarding = false; // 首启空账本引导
   String appVersion = '';
 
+  // ── 细粒度通知（性能） ───────────────────────────────────
+  /// 记一笔表单的专用通知源。
+  ///
+  /// 表单每次按键（金额数字、退格、切分类）若走 [notifyListeners]，
+  /// 会让同时挂在 IndexedStack 里的首页与统计页跟着整棵重建 ——
+  /// 统计页还要重算环形图 / 排行 / 双柱，真机上表现为「按数字键发涩」。
+  /// 表单变化只通知它，只有记账页（用 ValueListenableBuilder 订阅）会重建。
+  final ValueNotifier<int> formRev = ValueNotifier<int>(0);
+
+  /// 表单态变更：只通知 formRev（只有记账页订阅），
+  /// 首页 / 统计页不会被高频按键拖着重建。
+  void _bumpForm() => formRev.value++;
+
+  /// 数据态变更（账单 / 预算 / 分类 / 视图游标）统一出口：广播全量通知。
+  /// 与 [_bumpForm] 相对 —— 只有这类低频变更才值得让三页一起刷新。
+  void _notifyData() => notifyListeners();
+
   /// 初始化失败原因（非 null 时 ShellPage 展示错误态 + 重试按钮）。
   /// 之前失败只是打日志，UI 会永久停在加载圈，用户无从判断。
   String? initError;
@@ -102,7 +119,7 @@ class LedgerViewModel extends ChangeNotifier {
       initError = '$e';
       ready = false;
     }
-    notifyListeners();
+    _notifyData();
   }
 
   /// 初始化失败后的重试入口（ShellPage 错误态调用）
@@ -126,6 +143,7 @@ class LedgerViewModel extends ChangeNotifier {
     bills = await repo.loadBills();
     await _refreshWealth();
     await finishOnboarding();
+    _notifyData(); // 演示数据入库后要广播，首页/统计页才会重算
     _scheduleAutoBackup();
   }
 
@@ -134,33 +152,34 @@ class LedgerViewModel extends ChangeNotifier {
   }
 
   // ═══ 表单：键盘输入（直译模拟版 handleKey） ═════════════
+  // 注意：本节的写入一律走 _bumpForm()，不广播全量通知 —— 见 formRev 注释。
 
   void setFormType(String type) {
     form.type = type;
     _normalizeFormCategory();
-    notifyListeners();
+    _bumpForm();
   }
 
   void setFormCategory(String id) {
     form.categoryId = id;
-    notifyListeners();
+    _bumpForm();
   }
 
   void setFormNote(String note) {
     form.note = note;
-    // 备注实时入状态但不 notify（无 UI 联动，避免输入卡顿）
+    // 备注实时入状态但不通知（无 UI 联动，避免输入卡顿）
   }
 
-  /// showDatePicker 选日期（禁止未来）
+  /// 选日期（禁止未来）
   void setFormDate(int dateInt) {
     form.dateInt = dateInt;
-    notifyListeners();
+    _bumpForm();
   }
 
   void clearForm() {
     form.buffer = '';
     form.note = '';
-    notifyListeners();
+    _bumpForm();
   }
 
   void handleKey(String k) {
@@ -188,7 +207,7 @@ class LedgerViewModel extends ChangeNotifier {
     } else {
       return;
     }
-    notifyListeners();
+    _bumpForm();
   }
 
   /// 当前分类不在收支对应组时，自动切到该组第一个（直译模拟版）
@@ -235,7 +254,8 @@ class LedgerViewModel extends ChangeNotifier {
     billView.mode = 'day';
     billView.date = bill.date;
     billView.month = monthKeyOf(bill.date);
-    notifyListeners();
+    formRev.value++;
+    _notifyData();
     return SaveResult.ok;
   }
 
@@ -255,7 +275,7 @@ class LedgerViewModel extends ChangeNotifier {
     final id = bill.id;
     if (id == null) return;
     bills = bills.where((b) => b.id != id).toList();
-    notifyListeners();
+    _notifyData();
     _mutate(() async {
       await repo.softDelete(id);
       bills = await repo.loadBills();
@@ -293,14 +313,12 @@ class LedgerViewModel extends ChangeNotifier {
 
   List<Bill> billsOfView() {
     final v = billView;
-    final list = v.mode == 'month'
+    // bills 自身已由 repo 的 `ORDER BY date DESC, created_at DESC` 与
+    // saveBill 的插入排序维持倒序，过滤不会破坏次序 —— 这里不再重复排序
+    // （原实现在每次 build 里做一次 O(n log n)，是滚动掉帧的来源之一）。
+    return v.mode == 'month'
         ? bills.where((b) => monthKeyOf(b.date) == v.month).toList()
         : bills.where((b) => b.date == v.date).toList();
-    list.sort((a, b) =>
-        b.date.compareTo(a.date) != 0
-            ? b.date.compareTo(a.date)
-            : b.createdAt.compareTo(a.createdAt));
-    return list;
   }
 
   void shiftView(int delta) {
@@ -320,7 +338,7 @@ class LedgerViewModel extends ChangeNotifier {
       if (next > t || next < rng.minDate) return;
       v.date = next;
     }
-    notifyListeners();
+    _notifyData();
   }
 
   void switchGrain(String target) {
@@ -333,20 +351,20 @@ class LedgerViewModel extends ChangeNotifier {
       v.mode = 'day';
       v.date = v.month == todayMonthKey() ? todayInt() : monthKeyDay(v.month, 1);
     }
-    notifyListeners();
+    _notifyData();
   }
 
   void selectDate(int dateInt) {
     billView.mode = 'day';
     billView.date = dateInt;
     billView.month = monthKeyOf(dateInt);
-    notifyListeners();
+    _notifyData();
   }
 
   void selectMonth(String monthKey) {
     billView.mode = 'month';
     billView.month = monthKey;
-    notifyListeners();
+    _notifyData();
   }
 
   void backToToday() {
@@ -355,7 +373,7 @@ class LedgerViewModel extends ChangeNotifier {
     } else {
       billView.date = todayInt();
     }
-    notifyListeners();
+    _notifyData();
   }
 
   // ═══ 统计聚合（数据全量在内存，直译模拟版；万级数据切 SQL 见 README） ═══
@@ -441,7 +459,7 @@ class LedgerViewModel extends ChangeNotifier {
     categories = await repo.loadCategories();
     categoryMap = {for (final c in categories) c.id: c};
     await _refreshWealth();
-    notifyListeners();
+    _notifyData();
   }
 
   // ═══ 底层 ═════════════════════════════════════════════
@@ -467,7 +485,7 @@ class LedgerViewModel extends ChangeNotifier {
         // ignore: avoid_print
         print('[VM] 数据写入失败：$e');
       }
-      notifyListeners();
+      _notifyData();
       _scheduleAutoBackup();
     });
     _mutateTail = next;
@@ -486,6 +504,7 @@ class LedgerViewModel extends ChangeNotifier {
   @override
   void dispose() {
     _autoBackupTimer?.cancel();
+    formRev.dispose();
     super.dispose();
   }
 

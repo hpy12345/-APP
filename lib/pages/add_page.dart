@@ -41,6 +41,15 @@ class _AddPageState extends State<AddPage> {
   @override
   Widget build(BuildContext context) {
     final vm = context.watch<LedgerViewModel>();
+    // 表单变化（键值、分类、日期）只订阅 formRev —— 这类高频变化不该把
+    // 首页与统计页一起拖着重建（真机按数字键发涩的主因）。
+    return ValueListenableBuilder<int>(
+      valueListenable: vm.formRev,
+      builder: (context, _, __) => _body(context, vm),
+    );
+  }
+
+  Widget _body(BuildContext context, LedgerViewModel vm) {
     final form = vm.form;
     final isExpense = form.type == 'expense';
 
@@ -98,10 +107,10 @@ class _AddPageState extends State<AddPage> {
                 ),
               ),
 
-              // ── 金额区 ──
+              // ── 金额区（内边距收窄，给下方备注/日期栏腾出空间） ──
               Container(
-                margin: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-                padding: const EdgeInsets.fromLTRB(19, 17, 19, 17),
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                padding: const EdgeInsets.fromLTRB(18, 12, 18, 12),
                 decoration: paperCard(),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -112,38 +121,23 @@ class _AddPageState extends State<AddPage> {
                             color: Palette.textSub,
                             fontWeight: FontWeight.w600,
                             letterSpacing: 0.6)),
-                    const SizedBox(height: 7),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.baseline,
-                      textBaseline: TextBaseline.alphabetic,
-                      children: [
-                        Text('¥',
-                            style: serifStyle.copyWith(
-                                fontSize: 25,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: -0.3,
-                                color: isExpense
-                                    ? Palette.expense
-                                    : Palette.income)),
-                        const SizedBox(width: 5),
-                        Expanded(
-                          child: _AmountDisplay(
-                            buffer: form.buffer,
-                            isExpense: isExpense,
-                          ),
-                        ),
-                      ],
+                    const SizedBox(height: 4),
+                    _AmountDisplay(
+                      buffer: form.buffer,
+                      isExpense: isExpense,
+                      caretActive: vm.currentTab == 1,
                     ),
                   ],
                 ),
               ),
 
               // ── 分类（横向滚动） ──
+              // 顶部留 5px：选中态图标会上移 2px，ListView 视口不裁剪就会切掉上边框
               SizedBox(
-                height: 76,
+                height: 82,
                 child: ListView(
                   scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  padding: const EdgeInsets.fromLTRB(16, 5, 16, 0),
                   children: [
                     for (final c in vm.categories
                         .where((c) => c.type == form.type))
@@ -155,11 +149,11 @@ class _AddPageState extends State<AddPage> {
                   ],
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 9),
 
-              // ── 备注 / 日期 ──
+              // ── 备注 / 日期（行高压缩：系统键盘弹出时不会被盖住） ──
               Container(
-                margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
                 decoration: paperCard(),
                 child: Column(
                   children: [
@@ -168,7 +162,7 @@ class _AddPageState extends State<AddPage> {
                       child: TextField(
                         controller: _noteCtrl,
                         maxLength: 20,
-                        style: const TextStyle(fontSize: 15),
+                        style: const TextStyle(fontSize: 14.5),
                         textInputAction: TextInputAction.done,
                         onSubmitted: (_) => FocusScope.of(context).unfocus(),
                         // 点空白处收起系统键盘，露出被遮挡的自绘键盘
@@ -179,7 +173,7 @@ class _AddPageState extends State<AddPage> {
                           counterText: '',
                           hintText: '点击输入备注（选填）',
                           hintStyle: TextStyle(
-                              fontSize: 15, color: Color(0xFFC2B7A2)),
+                              fontSize: 14.5, color: Color(0xFFC2B7A2)),
                         ),
                       ),
                     ),
@@ -197,7 +191,7 @@ class _AddPageState extends State<AddPage> {
                             Text(
                               '${fmtDateDash(form.dateInt)}'
                               '  ${form.dateInt == todayInt() ? '今天' : weekLabel(form.dateInt)}',
-                              style: const TextStyle(fontSize: 15),
+                              style: const TextStyle(fontSize: 14.5),
                             ),
                             const Spacer(),
                             const Icon(Icons.calendar_month_outlined,
@@ -341,14 +335,14 @@ class _AddPageState extends State<AddPage> {
 
   Widget _metaRow({required String label, required Widget child}) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
         children: [
           SizedBox(
-            width: 46,
+            width: 44,
             child: Text(label,
                 style: serifStyle.copyWith(
-                    fontSize: 14,
+                    fontSize: 13.5,
                     color: Palette.textSub,
                     letterSpacing: 2)),
           ),
@@ -390,74 +384,178 @@ class _AddPageState extends State<AddPage> {
 
 // ═══ 金额显示（占位 0 + 光标闪烁） ═════════════════════════
 
+/// 金额显示：`¥` 与数字共用一条基线，光标底边落在数字基线上。
+///
+/// 旧实现把光标做成 `Row(crossAxisAlignment: baseline)` 里的一个 Container：
+/// 没有基线的子项在 Flex 里按 cross-start（顶边）摆放，于是光标比数字高出
+/// 一截 —— 就是用户看到的「光标没和数字对齐」。
+/// 这里改为按 TextPainter 实测度量定位，全部由字体度量推导，不依赖字体常识：
+///   数字基线（行盒顶 → 基线） = TextPainter.computeDistanceToActualBaseline
+///   光标 bottom 边距 = 行盒底 → 基线（即下伸缩部高度）
 class _AmountDisplay extends StatelessWidget {
   final String buffer;
   final bool isExpense;
+  final bool caretActive;
 
-  const _AmountDisplay({required this.buffer, required this.isExpense});
+  const _AmountDisplay({
+    required this.buffer,
+    required this.isExpense,
+    required this.caretActive,
+  });
+
+  /// 数字字号与行盒高（height 系数 = 47/39，与旧版一致）
+  static const double _digitFontSize = 39;
+  static const double _lineHeight = 47;
+  static const double _yenFontSize = 25;
+  static const double _yenGap = 5;
 
   @override
   Widget build(BuildContext context) {
     final hasVal = buffer.isNotEmpty && buffer != '0';
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.baseline,
-      textBaseline: TextBaseline.alphabetic,
-      children: [
-        Flexible(
-          child: Text(
-            hasVal ? buffer : '0',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: serifStyle.copyWith(
-              fontSize: 39,
-              fontWeight: FontWeight.w700,
-              letterSpacing: -1,
-              height: 47 / 39,
-              color: hasVal ? Palette.text : const Color(0xFFCDC2AD),
+    final shown = hasVal ? buffer : '0';
+
+    return LayoutBuilder(builder: (context, c) {
+      final color = hasVal ? Palette.text : const Color(0xFFCDC2AD);
+      final yenStyle = _yenStyle();
+      final yen = _Metric.of('¥', yenStyle);
+
+      var fs = _digitFontSize;
+      var digitsStyle = _digitStyle(fs, color);
+      var d = _Metric.of(shown, digitsStyle, c.maxWidth);
+
+      // 极长金额（9 位整数 + 2 位小数）在窄屏 / 大字体下等比降字号，防溢出
+      final avail = c.maxWidth - yen.width - _yenGap - 6;
+      if (d.width > avail && d.width > 0) {
+        fs = (fs * avail / d.width).floorToDouble().clamp(18.0, _digitFontSize);
+        digitsStyle = _digitStyle(fs, color);
+        d = _Metric.of(shown, digitsStyle, c.maxWidth);
+      }
+
+      final left = yen.width + _yenGap;
+      return SizedBox(
+        height: d.height,
+        width: double.infinity,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            // ¥：不同字号不能靠 Flex baseline 对齐，直接把自身基线抬到数字基线上
+            Positioned(
+              left: 0,
+              top: d.baseline - yen.baseline,
+              child: Text('¥', style: yenStyle),
             ),
-          ),
+            Positioned(
+              left: left,
+              top: 0,
+              child: Text(shown, maxLines: 1, style: digitsStyle),
+            ),
+            Positioned(
+              left: left + d.width + 4,
+              bottom: d.descender, // 底边正好压在基线上 → 与数字底部齐平
+              child: _BlinkingCaret(height: fs * 0.72, active: caretActive),
+            ),
+          ],
         ),
-        const _BlinkingCaret(),
-      ],
-    );
+      );
+    });
+  }
+
+  TextStyle _digitStyle(double fs, Color color) => serifStyle.copyWith(
+        fontSize: fs,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -1,
+        height: _lineHeight / _digitFontSize,
+        color: color,
+      );
+
+  TextStyle _yenStyle() => serifStyle.copyWith(
+        fontSize: _yenFontSize,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.3,
+        height: _lineHeight / _digitFontSize,
+        color: isExpense ? Palette.expense : Palette.income,
+      );
+}
+
+/// 一次文本实测：宽度 / 行盒高 / 基线 / 下伸缩部
+class _Metric {
+  final double width;
+  final double height;
+  final double baseline;
+  final double descender;
+
+  const _Metric(this.width, this.height, this.baseline, this.descender);
+
+  static _Metric of(String text, TextStyle style, [double maxWidth = 0]) {
+    final tp = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+    )..layout(
+        maxWidth:
+            maxWidth.isFinite && maxWidth > 0 ? maxWidth : double.infinity);
+    final b = tp.computeDistanceToActualBaseline(TextBaseline.alphabetic) ??
+        tp.height * 0.8;
+    return _Metric(tp.width, tp.height, b, tp.height - b);
   }
 }
 
-/// 光标闪烁（模拟版 caret 1s 步进）
+/// 光标闪烁（模拟版 caret 1s 步进）。
+/// [active] 为 false（不在记账页）时停掉定时器 —— IndexedStack 会一直保活
+/// 三个页面，不关的话后台仍在每 500ms 触发一次重绘。
 class _BlinkingCaret extends StatefulWidget {
-  const _BlinkingCaret();
+  final double height;
+  final bool active;
+
+  const _BlinkingCaret({required this.height, required this.active});
 
   @override
   State<_BlinkingCaret> createState() => _BlinkingCaretState();
 }
 
 class _BlinkingCaretState extends State<_BlinkingCaret> {
-  late final Timer _timer;
+  Timer? _timer;
   bool _visible = true;
 
   @override
   void initState() {
     super.initState();
-    _timer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      if (mounted) setState(() => _visible = !_visible);
-    });
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(covariant _BlinkingCaret oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.active != widget.active) _sync();
+  }
+
+  void _sync() {
+    _timer?.cancel();
+    _timer = null;
+    if (widget.active) {
+      _timer = Timer.periodic(const Duration(milliseconds: 520), (_) {
+        if (mounted) setState(() => _visible = !_visible);
+      });
+    } else {
+      _visible = true;
+    }
   }
 
   @override
   void dispose() {
-    _timer.cancel();
+    _timer?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.active) return const SizedBox.shrink();
     return AnimatedOpacity(
       opacity: _visible ? 1 : 0,
       duration: const Duration(milliseconds: 60),
       child: Container(
         width: 2,
-        height: 30,
-        margin: const EdgeInsets.only(left: 2, bottom: 4),
+        height: widget.height,
         color: Palette.brand,
       ),
     );
