@@ -28,7 +28,23 @@ if (hasReleaseKeystore) {
 android {
     namespace = "com.example.ledger"
     compileSdk = 35
-    ndkVersion = flutter.ndkVersion
+
+    // ⚠️ 不要改回 `flutter.ndkVersion`。
+    //
+    // Flutter 3.27.4 自带的 flutter.ndkVersion 是 26.1.10909125，但下列插件
+    // （2025 年后的版本）已要求 27.0.12077973：
+    //   file_picker / flutter_plugin_android_lifecycle / package_info_plus /
+    //   path_provider_android / shared_preferences_android / sqflite_android
+    //
+    // Flutter 的 Gradle 插件会校验这个不一致并**直接判构建失败**：
+    //   "Your project is configured with Android NDK 26.1.10909125, but the following
+    //    plugin(s) depend on a different Android NDK version: ... "
+    // （表现为 Gradle 跑了几分钟，最后只抛一句 Gradle build failed to produce an .apk file）
+    //
+    // NDK 向后兼容，取所有插件要求的最高值即可。升 Flutter / 升插件后若再报同类错，
+    // 按提示把这里改成新的最高版本。纯 Dart/Java 工程其实不需要 NDK，
+    // 但 AGP 在存在原生代码依赖时仍会做这个一致性校验。
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

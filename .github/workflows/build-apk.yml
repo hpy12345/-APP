@@ -50,6 +50,21 @@ jobs:
       - name: Ensure gradlew is executable
         run: chmod +x android/gradlew
 
+      # NDK 必须与插件要求**精确相等**，不能用"更高就行"的思路。
+      # Flutter 的 Gradle 插件做的是全等比较：
+      #     if (maxPluginNdkVersion != projectNdkVersion) { 报错 }
+      # （见 flutter_tools/gradle/src/main/groovy/flutter.groovy）
+      # 所以只能用 27.0.12077973 —— runner 预装的 27.3.x 同样会判失败。
+      # runner 上没有 27.0.12077973，这里显式安装，避免依赖 AGP 静默自动下载
+      # （那种失败只会抛一句 "Gradle build failed to produce an .apk file"，很难定位）。
+      - name: Install Android NDK 27.0.12077973
+        shell: bash
+        run: |
+          set -o pipefail
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null 2>&1 || true
+          "$SDKM" --install "ndk;27.0.12077973" 2>&1 | tail -20
+
       # 有密钥则落盘 android/key.properties + android/app/ledger-release.jks，
       # build.gradle.kts 检测到 key.properties 即自动启用 release 签名。
       - name: Configure release signing (optional)
@@ -109,11 +124,15 @@ jobs:
         run: |
           f="$RUNNER_TEMP/build.log"
           [ -f "$f" ] || exit 0
-          # 先把 % 转义成 %25，再用 awk 把换行换成字面量 %0A（printf 不带 \n）。
-          # 必须压成「一行」—— workflow command 是按行解析的，
-          # 多行的话第二行起不会被当成注解内容。
-          msg=$(tail -45 "$f" | tr -d '\r' | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
-          echo "::error title=Build failed (last 45 lines)::$msg"
+          # 既抓「关键字行」（可能出现在日志任何位置，例如 Flutter Gradle 插件
+          # 打印的 SDKS/NDK 版本校验错误），也抓结尾 35 行兜底。
+          {
+            grep -nE "FAILURE:|What went wrong|error:|Error:|ERROR|requires Android|depend on a different|compile against|Permission denied|Minimum supported Gradle|Could not|not found" "$f" | head -30 || true
+            echo "===== tail ====="
+            tail -35 "$f"
+          } | tr -d '\r' | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}' > "$RUNNER_TEMP/ann.txt"
+          # 必须压成「一行」—— workflow command 按行解析，多行只有首行算注解内容。
+          echo "::error title=Build failed::$(cat "$RUNNER_TEMP/ann.txt")"
 
       # 分 ABI 包：每台设备只带自己那份 so，体积约 −40%
       - name: Build split-per-ABI APKs
