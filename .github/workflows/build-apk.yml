@@ -28,17 +28,27 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # 固定到 24.04：ubuntu-latest 会在 2026-10-19 迁到 Ubuntu 26，
+    # 固定版本可避免"某天突然换系统"导致的构建漂移。
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # JDK 17：AGP 8.7.3 的硬性要求（同时提供 keytool）
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
+
+      # ⚠️ 关键一步，别删。
+      # Windows 上 git 的 core.fileMode=false，不跟踪文件权限位，所以
+      # gradlew 提交时是 100644（不可执行）。Linux runner 检出后调 ./gradlew
+      # 会直接 Permission denied → "Process completed with exit code 1"。
+      # 仓库里的 index 已修正为 100755；这里再兜一道，防止权限位再次丢失。
+      - name: Ensure gradlew is executable
+        run: chmod +x android/gradlew
 
       # 有密钥则落盘 android/key.properties + android/app/ledger-release.jks，
       # build.gradle.kts 检测到 key.properties 即自动启用 release 签名。
@@ -82,15 +92,35 @@ jobs:
         continue-on-error: true
 
       # 通用包：任何机型都能装，体积略大（推荐个人直装用这个）
+      # tee 把日志留到文件，供下面的失败诊断步骤使用
       - name: Build universal APK
-        run: flutter build apk --release
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter build apk --release 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      # 构建失败时把日志尾部转成 annotation。
+      # 为什么要这么绕：Actions 的原始日志下载接口需要鉴权，
+      # 而 annotation 可通过公开 API 免鉴权读取 —— 这样报错能被外部直接看到，
+      # 不用手动截图/贴日志。annotation 有长度上限，只截最后 45 行。
+      - name: Surface build error as annotation
+        if: failure()
+        shell: bash
+        run: |
+          f="$RUNNER_TEMP/build.log"
+          [ -f "$f" ] || exit 0
+          # 先把 % 转义成 %25，再用 awk 把换行换成字面量 %0A（printf 不带 \n）。
+          # 必须压成「一行」—— workflow command 是按行解析的，
+          # 多行的话第二行起不会被当成注解内容。
+          msg=$(tail -45 "$f" | tr -d '\r' | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+          echo "::error title=Build failed (last 45 lines)::$msg"
 
       # 分 ABI 包：每台设备只带自己那份 so，体积约 −40%
       - name: Build split-per-ABI APKs
         run: flutter build apk --release --split-per-abi
 
       - name: Upload APKs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ledger-apk
           if-no-files-found: error
