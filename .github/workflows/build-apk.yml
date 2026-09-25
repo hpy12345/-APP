@@ -124,11 +124,12 @@ jobs:
       # 为什么需要这一步：
       # Flutter 的 Gradle 插件是用
       #     assembleTask.doLast { project.copy { from <AGP 产物目录>/<outputFileName> ... } }
-      # 把 APK 拷到 build/app/outputs/flutter-apk/ 的。
-      # 而 Gradle 的 copy 在**源文件不存在时静默跳过、不报错** —— 于是会出现
-      # 「Gradle 成功退出、日志里没有任何报错、但 flutter build 报
+      # 把 APK 拷到 flutter-apk/ 的；而 Gradle 的 copy 在**源文件不存在时静默跳过、不报错**。
+      # 一旦构建目录配置有问题（例如 android/build.gradle.kts 漏了
+      # rootProject.layout.buildDirectory 重定向），就会出现
+      # 「Gradle 成功退出、日志零报错、但 flutter build 报
       #   Gradle build failed to produce an .apk file」这种极难定位的现象。
-      # 这里把 AGP 输出目录里的 APK 找出来归位，并把目录结构暴露成 annotation。
+      # 这里把两处可能的产物目录都扫一遍并归位，同时把目录结构暴露成 annotation。
       - name: Recover APK & diagnose
         if: steps.build.outcome == 'failure'
         shell: bash
@@ -137,15 +138,20 @@ jobs:
           mkdir -p build/app/outputs/flutter-apk
           {
             echo "build.log 行数: $(wc -l < "$RUNNER_TEMP/build.log")"
-            echo "--- AGP outputs 目录树 ---"
-            find android/app/build/outputs -maxdepth 4 2>/dev/null | head -40
-            echo "--- outputs 里的 apk ---"
-            find android/app/build/outputs -type f -name '*.apk' 2>/dev/null | head -20
-            echo "--- flutter-apk 目录（构建前）---"
+            for d in build/app/outputs android/app/build/outputs; do
+              echo "--- 目录树 $d ---"
+              find "$d" -maxdepth 4 2>/dev/null | head -30
+              echo "--- $d 里的 apk ---"
+              find "$d" -type f -name '*.apk' 2>/dev/null | head -10
+            done
+            echo "--- flutter-apk 目录（归位前）---"
             ls -la build/app/outputs/flutter-apk 2>&1 | head -10
           } > "$RUNNER_TEMP/diag.txt" 2>&1
-          # -n 不覆盖已有文件；只在 AGP 输出目录里找，避免把 intermediates 里的半成品拷进来
-          find android/app/build/outputs -type f -name '*.apk' -exec cp -v -n {} build/app/outputs/flutter-apk/ \; >> "$RUNNER_TEMP/diag.txt" 2>&1
+          # -n 不覆盖已有文件；只扫 outputs 目录，避免把 intermediates 里的半成品拷进来
+          for d in build/app/outputs android/app/build/outputs; do
+            [ -d "$d" ] || continue
+            find "$d" -type f -name '*.apk' -exec cp -n {} build/app/outputs/flutter-apk/ \; >> "$RUNNER_TEMP/diag.txt" 2>&1
+          done
           echo "--- 归位后 flutter-apk ---" >> "$RUNNER_TEMP/diag.txt"
           ls -la build/app/outputs/flutter-apk >> "$RUNNER_TEMP/diag.txt" 2>&1
           head -c 30000 "$RUNNER_TEMP/diag.txt" | tr -d '\r' | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}' > "$RUNNER_TEMP/ann.txt"
