@@ -293,45 +293,6 @@ class _Bar extends StatelessWidget {
     );
   }
 }
-
-/// 年视图图例（支出红 / 收入绿）
-class YearLegend extends StatelessWidget {
-  const YearLegend({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 14),
-      child: Column(
-        children: [
-          const Divider(height: 1, color: Palette.line),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              _item(Palette.expense, '支出'),
-              const SizedBox(width: 16),
-              _item(Palette.income, '收入'),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _item(Color color, String label) {
-    return Row(
-      children: [
-        Container(
-          width: 9,
-          height: 9,
-          decoration: BoxDecoration(
-              color: color, borderRadius: BorderRadius.circular(2)),
-        ),
-        const SizedBox(width: 6),
-        Text(label,
-            style: serifStyle.copyWith(
-                fontSize: 11.5, color: Palette.textSub, letterSpacing: 0.8)),
-      ],
-    );
-  }
-}
+// 注：这里原本还有一个 YearLegend（图例：支出红 / 收入绿）。
+// 选中月的读数条本身就带 ● 支出 / ● 收入 两个色点，图例属于重复信息，
+// 用户要求去掉，于是连组件一并删除。

@@ -242,14 +242,8 @@ class _StatPageState extends State<StatPage> {
                   PanelCard(
                     title: '12 个月收支走势',
                     trailing: _yearTip(vm),
-                    child: Column(
-                      children: [
-                        YearBars(
-                            months: vm.monthlySumsOfYear(_year),
-                            year: _year),
-                        const YearLegend(),
-                      ],
-                    ),
+                    child: YearBars(
+                        months: vm.monthlySumsOfYear(_year), year: _year),
                   ),
 
                 // ── 分类排行 ──

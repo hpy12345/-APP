@@ -491,7 +491,12 @@ class _AmountField extends StatelessWidget {
   /// 行盒高 / 字号（沿用旧版 47/39 的比例，改字号时行距同比缩）
   static const double _lineFactor = 47 / 39;
   static const double _yenSize = 19;
-  static const double _yenGap = 4;
+
+  /// ¥ 与数字之间的间距。
+  /// InputDecorator 里 prefix 与输入框是**紧挨着**摆的（间距 = 前缀自身宽度，
+  /// 没有额外空隙），所以只能由 prefix 自己的右内边距给出。
+  /// 这里同时用于「长金额自动降字号」的宽度预算，两处保持同一个值。
+  static const double _yenGap = 9;
   static const Color _placeholder = Color(0xFFCDC2AD);
 
   TextStyle _digitStyle(double fs, Color color) => serifStyle.copyWith(
@@ -553,8 +558,13 @@ class _AmountField extends StatelessWidget {
           isDense: true,
           contentPadding: EdgeInsets.zero,
           border: InputBorder.none,
-          prefixText: '¥',
-          prefixStyle: yenStyle,
+          // 用 prefix（widget）而不是 prefixText：要在货币符号与数字之间留出
+          // [_yenGap] 的间距，只能把它做进前缀自己的内边距（Padding 会把子级的
+          // 基线透传出去，所以仍与数字同基线）。
+          prefix: Padding(
+            padding: const EdgeInsets.only(right: _yenGap),
+            child: Text('¥', style: yenStyle),
+          ),
           hintText: '0',
           hintStyle: _digitStyle(fs, _placeholder),
         ),
