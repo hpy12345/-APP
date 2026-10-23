@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
@@ -29,6 +30,14 @@ class BackupService {
   /// 为什么不回传 `saveFile` 的返回值：Android 上它给的是 SAF 的
   /// `content://…` URI（形如 `content://…/msf%3A1000000042`），
   /// 直接展示对用户零信息量；文件名是我们自己拼的，一定可读。
+  ///
+  /// 为什么 `type: FileType.any` 而不是 `custom + ['json']`：
+  /// Android 的保存/选择对话框是**按 MIME 过滤**的，而 .json 在不同 ROM /
+  /// 文件管理器里上报的 MIME 并不统一（application/json / text/plain /
+  /// octet-stream）。声明成 custom+json 后，只要系统那边报的不是
+  /// application/json，这类文件就会被判定为「不符」—— 表现为**按钮变灰、
+  /// 列表里根本看不见备份文件**，用户看到的就是「这个 app 读不了文件」。
+  /// 放开类型不做过滤，靠内容校验（parseBackup）保证只吃自己的备份。
   Future<String?> exportBackup({required String appVersion}) async {
     final dto = await repo.buildBackup(appVersion);
     final json = const JsonEncoder.withIndent('  ').convert(dto.toJson());
@@ -38,26 +47,60 @@ class BackupService {
     final path = await FilePicker.platform.saveFile(
       fileName: fileName,
       bytes: utf8.encode(json),
-      type: FileType.custom,
-      allowedExtensions: ['json'],
+      type: FileType.any,
     );
     return path == null ? null : fileName;
   }
 
   // ── 手动导入（SAF 选择） ─────────────────────────────────
 
-  /// 用户取消返回 null；文件无效抛 [FormatException]。
+  /// 用户取消返回 null；文件不可读 / 不是有效备份抛 [FormatException]。
+  ///
+  /// 三道防线（真机「读不到文件」的三种成因都覆盖）：
+  /// ① 不按扩展名/MIME 过滤 —— 否则备份文件在选择器里是灰的（见 [exportBackup] 注释）；
+  /// ② `bytes` 拿不到时退回按 `path` 读 —— 部分 ROM 的 provider 只给路径不给字节
+  ///    （file_picker 会把选中的文件缓存一份到应用缓存目录，path 一定可用）；
+  /// ③ 报错带上文件名与体积，用户复述问题时一眼能定位是哪个文件。
   Future<BackupDto?> pickBackup() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['json'],
-      withData: true,
-    );
-    if (result == null || result.files.isEmpty) return null;
-    final bytes = result.files.single.bytes;
-    if (bytes == null) throw const FormatException('无法读取所选文件');
-    final raw = utf8.decode(bytes, allowMalformed: true);
-    return parseBackupAsync(raw); // Isolate 内解析，万级数据不卡 UI
+    FilePickerResult? result;
+    try {
+      result = await FilePicker.platform.pickFiles(
+        type: FileType.any,
+        withData: true,
+      );
+    } on PlatformException catch (e) {
+      throw FormatException('打不开系统文件选择器：${e.message ?? e.code}');
+    }
+    if (result == null || result.files.isEmpty) return null; // 用户取消
+    final f = result.files.single;
+
+    // 防误选：记账备份都是几十 KB 级，超过 20MB 基本都是选错了（视频/安装包）
+    if (f.size > 20 * 1024 * 1024) {
+      throw FormatException('「${f.name}」太大（>20MB），不像是记账备份');
+    }
+
+    List<int>? bytes = f.bytes;
+    if (bytes == null || bytes.isEmpty) {
+      final path = f.path;
+      if (path != null) {
+        try {
+          bytes = await File(path).readAsBytes();
+        } catch (_) {
+          // 失败就交给下面统一报错
+        }
+      }
+    }
+    if (bytes == null || bytes.isEmpty) {
+      throw FormatException('读不到「${f.name}」，换个文件管理器再选一次');
+    }
+
+    try {
+      return await parseBackupAsync(
+          utf8.decode(bytes, allowMalformed: true));
+    } on FormatException catch (e) {
+      // 把文件名拼进解析错误里：「xx.json」不是有效的 JSON 文件
+      throw FormatException('「${f.name}」${e.message}');
+    }
   }
 
   // ── 自动备份（应用私有目录） ──────────────────────────────
