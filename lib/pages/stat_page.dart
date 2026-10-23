@@ -15,8 +15,10 @@ import '../widgets/year_bars.dart';
 import 'data_page.dart';
 
 /// 统计页（复刻模拟版 page-stat）：
-/// 月 / 年粒度切换 + 时间步进器 → 本期收支双卡 → 环形图（月）/ 12 月双柱（年）
-/// → 分类排行。右上角入口进入「数据管理」（备份 / 恢复 / 关于）。
+/// 月 / 年粒度切换 + 时间步进器 → 本期收支双卡 →
+/// **月视图：一个「支出分类占比」模块（扇形图居中 + 下方占比排行）**；
+/// 年视图：12 月双柱 → 全年分类排行。
+/// 右上角入口进入「数据管理」（备份 / 恢复 / 关于）。
 class StatPage extends StatefulWidget {
   const StatPage({super.key});
 
@@ -213,49 +215,50 @@ class _StatPageState extends State<StatPage> {
                   ),
                 ),
 
-                // ── 月：环形图 ／ 年：12 月双柱 ──
+                // ── 月：扇形图 + 占比排行（v2.0.0 合并为一个模块）／年：12 月双柱 ──
                 if (!isYear)
                   PanelCard(
                     title: '支出分类占比',
-                    trailing: rows.length > 6
-                        ? '前 6 · 共 ${rows.length} 类'
-                        : '共 ${rows.length} 类',
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
+                    trailing: rows.isEmpty ? null : '共 ${rows.length} 类',
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        DonutChart(
-                            rows: rows,
-                            colors: colors,
-                            totalCents: totalExpense),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: DonutLegend(
+                        // 扇形图：水平居中、直径 200（原来右边挤图例，只有 150）
+                        Center(
+                          child: DonutChart(
                               rows: rows,
                               colors: colors,
-                              categoryMap: vm.categoryMap,
                               totalCents: totalExpense),
                         ),
+                        const SizedBox(height: 20),
+                        // 占比明细列表：原来独立的「分类排行」卡片并到这里，
+                        // 色板与扇形图同一套（第 i 个分类两边同色）
+                        BarRank(
+                            rows: rows,
+                            colors: colors,
+                            categoryMap: vm.categoryMap,
+                            totalCents: totalExpense),
                       ],
                     ),
                   )
-                else
+                else ...[
                   PanelCard(
                     title: '12 个月收支走势',
                     trailing: _yearTip(vm),
                     child: YearBars(
                         months: vm.monthlySumsOfYear(_year), year: _year),
                   ),
-
-                // ── 分类排行 ──
-                PanelCard(
-                  title: isYear ? '全年分类排行' : '分类排行',
-                  trailing: '按金额降序',
-                  child: BarRank(
-                      rows: rows,
-                      colors: colors,
-                      categoryMap: vm.categoryMap,
-                      totalCents: totalExpense),
-                ),
+                  // 年视图没有扇形图，排行仍单列一张卡
+                  PanelCard(
+                    title: '全年分类排行',
+                    trailing: '按金额降序',
+                    child: BarRank(
+                        rows: rows,
+                        colors: colors,
+                        categoryMap: vm.categoryMap,
+                        totalCents: totalExpense),
+                  ),
+                ],
               ],
             ),
           ),
